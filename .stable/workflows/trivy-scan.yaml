@@ -1,6 +1,6 @@
 # Agent: trivy on PATH or curl to install; Docker optional for image mode.
 name: trivy-scan
-version: "1.1.1"
+version: "1.1.2"
 description: Filesystem or image scan with Trivy; optional CycloneDX SBOM for Meticulous SBOM tab.
 inputs:
   mode:
@@ -40,6 +40,24 @@ jobs:
           if ! command -v trivy >/dev/null 2>&1; then
             echo "Install trivy on the agent (https://aquasecurity.github.io/trivy)." >&2
             exit 1
+          fi
+          # Trivy pulls the vuln DB over OCI; it reads Docker's config.json for registry auth helpers.
+          # A host config with credsStore=docker-credential-desktop breaks headless agents (helper missing).
+          _TDOCKER="${METICULOUS_WORKSPACE:-${TMPDIR:-/tmp}}/.met-trivy-docker-config-$$"
+          mkdir -p "${_TDOCKER}"
+          printf '%s\n' '{"auths":{}}' > "${_TDOCKER}/config.json"
+          export DOCKER_CONFIG="${_TDOCKER}"
+          # When the Docker daemon is not available, use Podman's Docker-compatible socket (agent must expose it).
+          if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+            if command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+              for _sock in /run/podman/podman.sock "${XDG_RUNTIME_DIR:-}"/podman/podman.sock; do
+                if [ -S "${_sock}" ]; then
+                  export DOCKER_HOST="unix://${_sock}"
+                  echo "Using Podman Docker API at ${_sock}" >&2
+                  break
+                fi
+              done
+            fi
           fi
           if [ "${MODE}" = "fs" ]; then
             case "${TARGET}" in (*..*|/*) exit 1;; esac
