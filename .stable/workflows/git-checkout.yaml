@@ -1,0 +1,55 @@
+# Agent: Linux, git on PATH, network egress to clone host.
+# Optional: GITHUB_TOKEN (or host-specific token) in job env for private repos — inject via pipeline secrets, never commit.
+# Pool: default Linux tags below; override per org.
+#
+# When using workflow outputs, a follow-up step in the same job can run:
+#   met-output var CLONE_PATH="${SRC}"
+# so downstream jobs resolve ${{ workflows.<id>.outputs.CLONE_PATH }}.
+name: git-checkout
+version: "1.0.0"
+description: Shallow clone a Git repository into the workspace (MAR/git-clone-snippet style).
+inputs:
+  repo:
+    type: string
+    required: true
+    description: Repository as org/repo (GitHub-style path segment after github.com).
+  ref:
+    type: string
+    required: false
+    default: "HEAD"
+    description: Git ref to checkout (branch, tag, or SHA; default shallow uses default branch).
+  clone_path:
+    type: string
+    required: false
+    default: "src"
+    description: Directory name under METICULOUS_WORKSPACE for the clone (relative segment only).
+outputs:
+  clone_path:
+    description: Relative clone directory under the workspace (matches input clone_path).
+jobs:
+  - name: Clone
+    id: clone
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Git checkout
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?METICULOUS_WORKSPACE must be set by the agent}"
+          REL="${{ inputs.clone_path }}"
+          case "${REL}" in (*/*|*..*|/*|"") echo "clone_path must be a single relative segment" >&2; exit 1;; esac
+          DEST="${WS}/${REL}"
+          mkdir -p "${DEST}"
+          REF="${{ inputs.ref }}"
+          REPO="${{ inputs.repo }}"
+          echo "Cloning ${REPO} @ ${REF} into ${DEST}..."
+          if [ -n "${GITHUB_TOKEN:-}" ]; then
+            git clone --progress --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" "${DEST}"
+          else
+            git clone --progress --depth 1 "https://github.com/${REPO}.git" "${DEST}"
+          fi
+          if [ "${REF}" != "HEAD" ]; then
+            git -C "${DEST}" fetch --depth 1 origin "${REF}" && git -C "${DEST}" checkout FETCH_HEAD
+          fi
+          ls -la "${DEST}"

@@ -1,0 +1,41 @@
+# Agent: aws CLI optional (only for sanity checks). Does **not** fetch secrets — credentials must already
+# be decrypted into the job environment by the controller from **pipeline secrets** you declare on the pipeline.
+#
+# Map standard names by exporting from values already present in the environment (inject secret keys
+# on the pipeline, then reference those names in pipeline/env — never embed secret values in this file).
+name: configure-aws-env
+version: "1.0.0"
+description: Normalize AWS env vars (region, optional profile) assuming credentials are pre-injected.
+inputs:
+  aws_region:
+    type: string
+    required: false
+    default: "us-east-1"
+    description: AWS_REGION value to export.
+  aws_default_output:
+    type: string
+    required: false
+    default: "json"
+    description: AWS_DEFAULT_OUTPUT.
+jobs:
+  - name: Env
+    id: env
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Export
+        run: |
+          set -euo pipefail
+          export AWS_REGION="${{ inputs.aws_region }}"
+          export AWS_DEFAULT_OUTPUT="${{ inputs.aws_default_output }}"
+          echo "AWS_REGION=${AWS_REGION}"
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "Expected AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in environment (from pipeline secrets)." >&2
+            exit 1
+          fi
+          if command -v aws >/dev/null 2>&1; then
+            aws sts get-caller-identity --output text || exit 1
+          else
+            echo "aws CLI not installed; skipping get-caller-identity (credentials present)." >&2
+          fi

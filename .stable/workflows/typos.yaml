@@ -1,0 +1,40 @@
+# Agent: typos CLI on PATH (https://github.com/crate-ci/typos) or install in a prior setup step.
+# Pool: Linux recommended.
+name: typos
+version: "1.0.0"
+description: Run crate-ci/typos over the workspace or a subpath.
+inputs:
+  path:
+    type: string
+    required: false
+    default: "."
+    description: Path relative to METICULOUS_WORKSPACE to scan.
+  config:
+    type: string
+    required: false
+    description: Optional path to `_typos.toml` relative to workspace (must not traverse ..).
+jobs:
+  - name: Typos
+    id: typos
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Check
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          SUB="${{ inputs.path }}"
+          case "${SUB}" in (*..*) echo "invalid path" >&2; exit 1;; esac
+          SCAN="${WS}/${SUB}"
+          ARGS=(--format brief)
+          CFG="${{ inputs.config }}"
+          if [ -n "${CFG}" ]; then
+            case "${CFG}" in (*..*|/*) echo "invalid config path" >&2; exit 1;; esac
+            ARGS+=(--config "${WS}/${CFG}")
+          fi
+          if ! command -v typos >/dev/null 2>&1; then
+            echo "typos CLI not found on PATH; install typos or use a toolbox image that includes it." >&2
+            exit 1
+          fi
+          typos "${ARGS[@]}" "${SCAN}"

@@ -1,0 +1,43 @@
+# Agent: curl, sh, Linux. Installs rustup default toolchain; TOOL_VERSION via inputs.rust_toolchain (e.g. 1.85.0).
+# Overrides RUSTUP_HOME/CARGO_HOME under workspace to keep toolchains inside the job workspace.
+# For multi-step jobs, expose paths with one met-output var per key when platform outputs are enabled.
+name: setup-rust
+version: "1.0.0"
+description: Install rustup and a pinned toolchain under the workspace.
+inputs:
+  rust_toolchain:
+    type: string
+    required: false
+    default: "stable"
+    description: Toolchain channel or version for rustup (e.g. 1.85.0, nightly-2025-01-01).
+  rustup_home:
+    type: string
+    required: false
+    default: ".toolcache/rustup"
+    description: RUSTUP_HOME relative to workspace.
+  cargo_home:
+    type: string
+    required: false
+    default: ".toolcache/cargo"
+    description: CARGO_HOME relative to workspace.
+jobs:
+  - name: Setup
+    id: setup
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: rustup
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          RU="${{ inputs.rustup_home }}"
+          CH="${{ inputs.cargo_home }}"
+          case "${RU}" in (*..*) exit 1;; esac
+          case "${CH}" in (*..*) exit 1;; esac
+          export RUSTUP_HOME="${WS}/${RU}"
+          export CARGO_HOME="${WS}/${CH}"
+          mkdir -p "${RUSTUP_HOME}" "${CARGO_HOME}"
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain "${{ inputs.rust_toolchain }}"
+          export PATH="${CARGO_HOME}/bin:${PATH}"
+          rustc --version

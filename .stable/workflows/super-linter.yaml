@@ -1,0 +1,40 @@
+# Agent: Docker or Podman CLI with a usable engine (often requires socket access / privileged runner).
+# Image: github/super-linter (large). Set SUPER_LINTER_MULTIPLE_IMAGES env as needed upstream documents.
+#
+# If docker/podman is missing or engine unreachable, this step prints a clear message and exits non-zero.
+name: super-linter
+version: "1.0.0"
+description: Run GitHub super-linter via container when a container engine is available.
+inputs:
+  validate_all_codebase:
+    type: string
+    required: false
+    default: "false"
+    description: Passed to SUPER_LINTER as VALIDATE_ALL_CODEBASE (true/false string).
+  default_branch:
+    type: string
+    required: false
+    default: main
+    description: DEFAULT_BRANCH for super-linter.
+jobs:
+  - name: Lint
+    id: lint
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: super-linter
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          RUNNER=()
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            RUNNER=(docker run --rm -e RUNNER_WORKSPACE=/tmp/lint -e DEFAULT_BRANCH="${{ inputs.default_branch }}" -e VALIDATE_ALL_CODEBASE="${{ inputs.validate_all_codebase }}" -v "${WS}:/tmp/lint" ghcr.io/super-linter/super-linter:latest)
+          elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+            RUNNER=(podman run --rm -e RUNNER_WORKSPACE=/tmp/lint -e DEFAULT_BRANCH="${{ inputs.default_branch }}" -e VALIDATE_ALL_CODEBASE="${{ inputs.validate_all_codebase }}" -v "${WS}:/tmp/lint" ghcr.io/super-linter/super-linter:latest)
+          else
+            echo "super-linter requires docker or podman with a working engine; none found." >&2
+            echo "Use a toolbox agent image with Docker-in-Docker or install podman with a usable socket." >&2
+            exit 1
+          fi
+          "${RUNNER[@]}"

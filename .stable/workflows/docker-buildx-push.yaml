@@ -1,0 +1,87 @@
+# Agent: Docker or Podman per MAR patterns; `.meticulous_container_engine` + `.meticulous_probe_docker_host.sh`.
+# Pipeline must supply registry credentials via **secrets** (e.g. REGISTRY_USERNAME / REGISTRY_PASSWORD) injected into job env —
+# reference those names in your pipeline YAML only, never hardcode values (see repository codeguard rules).
+#
+# Outputs: set image_uri with `met-output var IMAGE_URI=...` after push when workflow outputs are enabled.
+name: docker-buildx-push
+version: "1.0.0"
+description: Detect docker/podman, buildx build with SBOM option, push image (MAR-style).
+inputs:
+  context_path:
+    type: string
+    required: false
+    default: "."
+    description: Build context relative to workspace.
+  dockerfile:
+    type: string
+    required: false
+    default: "Dockerfile"
+    description: Dockerfile path relative to context.
+  image_ref:
+    type: string
+    required: true
+    description: Full image reference to tag and push (e.g. ghcr.io/org/app:tag — use pipeline vars).
+  registry_host:
+    type: string
+    required: true
+    description: Registry host for login (hostname only).
+  buildx_platform:
+    type: string
+    required: false
+    default: "linux/amd64"
+    description: docker buildx --platform value.
+jobs:
+  - name: Build push
+    id: publish
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Engine probe
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          ENGINE_FILE="${WS}/.meticulous_container_engine"
+          {
+            echo 'if [ -z "${DOCKER_HOST-}" ]; then'
+            echo '  for sock in /var/run/meticulous-dind/docker.sock /var/run/docker.sock; do'
+            echo '    [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break'
+            echo '  done'
+            echo 'fi'
+          } > "${WS}/.meticulous_probe_docker_host.sh"
+          # shellcheck disable=SC1091
+          . "${WS}/.meticulous_probe_docker_host.sh"
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            echo docker > "${ENGINE_FILE}"
+          elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+            echo podman > "${ENGINE_FILE}"
+          else
+            echo "No usable container engine" >&2
+            exit 1
+          fi
+      - name: Login build push
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          ENG="$(cat "${WS}/.meticulous_container_engine")"
+          # shellcheck disable=SC1091
+          . "${WS}/.meticulous_probe_docker_host.sh"
+          HOST="${{ inputs.registry_host }}"
+          IMG="${{ inputs.image_ref }}"
+          CTX="${WS}/${{ inputs.context_path }}"
+          DF="${{ inputs.dockerfile }}"
+          case "${{ inputs.context_path }}" in (*..*) exit 1;; esac
+          if [ -n "${REGISTRY_PASSWORD:-}" ]; then
+            echo "${REGISTRY_PASSWORD}" | ${ENG} login -u "${REGISTRY_USERNAME:-}" --password-stdin "${HOST}"
+          else
+            echo "REGISTRY_PASSWORD / REGISTRY_USERNAME expected from pipeline secrets for login" >&2
+            exit 1
+          fi
+          ${ENG} buildx version >/dev/null 2>&1 || { echo "buildx required" >&2; exit 1; }
+          ${ENG} buildx build \
+            --platform "${{ inputs.buildx_platform }}" \
+            --file "${CTX}/${DF}" \
+            --sbom=true \
+            --push \
+            -t "${IMG}" \
+            "${CTX}"

@@ -1,0 +1,40 @@
+# Agent: curl or HTTPS access, Linux x86_64. Uses official python-build-standalone indygreg install pattern.
+# TOOL_VERSION: set via inputs.python_version (e.g. 3.12.7).
+# For multi-step jobs, after setup you may propagate paths with met-output var PY_HOME=... (when platform supports outputs).
+name: setup-python
+version: "1.0.0"
+description: Install a standalone CPython into the workspace (pinned version).
+inputs:
+  python_version:
+    type: string
+    required: false
+    default: "3.12.7"
+    description: Full Python version to install (must match published indygreg build naming).
+  install_root:
+    type: string
+    required: false
+    default: ".toolcache/python"
+    description: Directory under workspace for the install (single relative segment or nested without ..).
+jobs:
+  - name: Setup
+    id: setup
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Install CPython
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          VER="${{ inputs.python_version }}"
+          ROOT="${{ inputs.install_root }}"
+          case "${ROOT}" in (*..*) echo "invalid install_root" >&2; exit 1;; esac
+          DEST="${WS}/${ROOT}"
+          mkdir -p "${DEST}"
+          ARCH="$(uname -m)"
+          case "${ARCH}" in (x86_64) ARCH2=x86_64;; (aarch64) ARCH2=aarch64;; (*) echo "unsupported arch ${ARCH}" >&2; exit 1;; esac
+          URL="https://github.com/indygreg/python-build-standalone/releases/download/20241016/cpython-${VER}+20241016-${ARCH2}-unknown-linux-gnu-install_only.tar.gz"
+          echo "Downloading ${URL}..."
+          curl -fsSL "${URL}" -o /tmp/py.tgz
+          tar -xzf /tmp/py.tgz -C "${DEST}" --strip-components=1
+          "${DEST}/bin/python3" --version

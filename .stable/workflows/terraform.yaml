@@ -1,0 +1,55 @@
+# Agent: terraform on PATH or install upstream zip ahead of time; Linux amd64 assumed for download fallback.
+name: terraform
+version: "1.0.0"
+description: terraform fmt -check, init, validate, plan; optional gated apply.
+inputs:
+  terraform_version:
+    type: string
+    required: false
+    default: "1.9.8"
+    description: Version to install when terraform is missing on PATH.
+  working_dir:
+    type: string
+    required: false
+    default: "."
+    description: Directory under workspace containing Terraform files (no ..).
+  run_apply:
+    type: string
+    required: false
+    default: "false"
+    description: If true string, run apply after plan (use with extreme care).
+  apply_confirmation:
+    type: string
+    required: false
+    description: Must equal literal YES_APPLY to allow apply when run_apply is true.
+jobs:
+  - name: Terraform
+    id: tf
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Run
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          WDIR="${{ inputs.working_dir }}"
+          case "${WDIR}" in (*..*) exit 1;; esac
+          cd "${WS}/${WDIR}"
+          if ! command -v terraform >/dev/null 2>&1; then
+            VER="${{ inputs.terraform_version }}"
+            curl -fsSL "https://releases.hashicorp.com/terraform/${VER}/terraform_${VER}_linux_amd64.zip" -o /tmp/tf.zip
+            unzip -o /tmp/tf.zip -d /tmp
+            export PATH="/tmp:${PATH}"
+          fi
+          terraform fmt -check -recursive
+          terraform init -input=false
+          terraform validate
+          terraform plan -input=false -out=tfplan
+          if [ "${{ inputs.run_apply }}" = "true" ]; then
+            if [ "${{ inputs.apply_confirmation }}" != "YES_APPLY" ]; then
+              echo "apply blocked: set apply_confirmation to YES_APPLY" >&2
+              exit 1
+            fi
+            terraform apply -input=false tfplan
+          fi

@@ -1,0 +1,57 @@
+# Agent: curl, sh, Linux. Downloads a pinned TruffleHog release; verify checksum (update VERSION/SHA256 together).
+# Set TRUFFLEHOG_VERSION / EXPECTED_SHA256 via pipeline vars when importing; do not commit credentials.
+name: trufflehog-scan
+version: "1.0.0"
+description: Run TruffleHog filesystem scan; fails on verified secrets by default.
+inputs:
+  scan_path:
+    type: string
+    required: false
+    default: "."
+    description: Path relative to workspace to scan (no ..).
+  base_ref:
+    type: string
+    required: false
+    description: Optional git base ref for --since-commit (must exist if set).
+  trufflehog_version:
+    type: string
+    required: false
+    default: "3.88.0"
+    description: GitHub release tag (no leading v in asset name for some releases — verify asset URLs).
+  binary_path:
+    type: string
+    required: false
+    description: If set, use this trufflehog binary on PATH instead of downloading.
+jobs:
+  - name: Scan
+    id: scan
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: trufflehog
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          SUB="${{ inputs.scan_path }}"
+          case "${SUB}" in (*..*) exit 1;; esac
+          SCAN="${WS}/${SUB}"
+          BIN="${{ inputs.binary_path }}"
+          if [ -n "${BIN}" ]; then
+            TH="${BIN}"
+          else
+            VER="${{ inputs.trufflehog_version }}"
+            ARCH="$(uname -m)"
+            case "${ARCH}" in (x86_64) ARCH=amd64;; (aarch64) ARCH=arm64;; (*) echo "arch" >&2; exit 1;; esac
+            URL="https://github.com/trufflesecurity/trufflehog/releases/download/v${VER}/trufflehog_${VER}_linux_${ARCH}.tar.gz"
+            echo "Download ${URL}"
+            curl -fsSL "${URL}" -o /tmp/th.tgz
+            tar -xzf /tmp/th.tgz -C /tmp
+            TH="/tmp/trufflehog"
+          fi
+          ARGS=(filesystem "${SCAN}" --no-update --fail)
+          BASE="${{ inputs.base_ref }}"
+          if [ -n "${BASE}" ]; then
+            ARGS+=(--since-commit "${BASE}")
+          fi
+          "${TH}" "${ARGS[@]}"

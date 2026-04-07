@@ -1,0 +1,43 @@
+# Agent: bash/sh on Linux; pwsh on Windows agents when shell=pwsh.
+# Executes a script **file** from the workspace only (no inline arbitrary command strings).
+name: run-script
+version: "1.0.0"
+description: Run a script file under METICULOUS_WORKSPACE with bash, sh, or pwsh.
+inputs:
+  script_path:
+    type: string
+    required: true
+    description: Path to script relative to METICULOUS_WORKSPACE (no .. segments, no absolute paths).
+  shell:
+    type: string
+    required: false
+    default: bash
+    description: One of bash, sh, pwsh (case-sensitive).
+jobs:
+  - name: Run
+    id: run
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Execute
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          REL="${{ inputs.script_path }}"
+          case "${REL}" in (*..*|/*|"") echo "script_path must be relative with no .." >&2; exit 1;; esac
+          SPATH="${WS}/${REL}"
+          if [ ! -f "${SPATH}" ]; then
+            echo "script not found: ${SPATH}" >&2
+            exit 1
+          fi
+          SHELL="${{ inputs.shell }}"
+          case "${SHELL}" in
+            bash) exec bash "${SPATH}" ;;
+            sh) exec sh "${SPATH}" ;;
+            pwsh)
+              echo "pwsh: use a Windows-capable agent pool; on Linux use bash or sh." >&2
+              exit 1
+              ;;
+            *) echo "shell must be bash, sh, or pwsh" >&2; exit 1;;
+          esac

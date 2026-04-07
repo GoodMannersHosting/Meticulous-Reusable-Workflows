@@ -1,0 +1,40 @@
+# Agent: curl, tar, Linux. TOOL_VERSION via inputs.go_version (e.g. 1.23.4).
+# For multi-step jobs, propagate GOROOT/GOPATH with met-output var ... when platform outputs are enabled.
+name: setup-go
+version: "1.0.0"
+description: Install Go toolchain into the workspace (official tarball).
+inputs:
+  go_version:
+    type: string
+    required: false
+    default: "1.23.4"
+    description: Go version string matching official dist naming.
+  install_root:
+    type: string
+    required: false
+    default: ".toolcache/go"
+    description: Directory under workspace (no ..).
+jobs:
+  - name: Setup
+    id: setup
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Install Go
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          VER="${{ inputs.go_version }}"
+          ROOT="${{ inputs.install_root }}"
+          case "${ROOT}" in (*..*) echo "invalid install_root" >&2; exit 1;; esac
+          DEST="${WS}/${ROOT}"
+          mkdir -p "${DEST}"
+          ARCH="$(uname -m)"
+          case "${ARCH}" in (x86_64) ARCH2=amd64;; (aarch64) ARCH2=arm64;; (*) echo "unsupported arch" >&2; exit 1;; esac
+          URL="https://go.dev/dl/go${VER}.linux-${ARCH2}.tar.gz"
+          curl -fsSL "${URL}" -o /tmp/go.tgz
+          tar -xzf /tmp/go.tgz -C "${DEST}" --strip-components=1
+          export GOROOT="${DEST}"
+          export PATH="${GOROOT}/bin:${PATH}"
+          go version

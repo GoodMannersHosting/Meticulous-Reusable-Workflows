@@ -1,0 +1,49 @@
+# Agent: trivy on PATH or curl to install; Docker optional for image mode.
+name: trivy-scan
+version: "1.0.0"
+description: Filesystem or image scan with Trivy; optional CycloneDX SBOM for Meticulous SBOM tab.
+inputs:
+  mode:
+    type: string
+    required: false
+    default: fs
+    description: fs or image.
+  target:
+    type: string
+    required: true
+    description: For fs — path relative to workspace. For image — image reference (e.g. alpine:3.20).
+  cyclonedx_path:
+    type: string
+    required: false
+    default: "sbom.cdx.json"
+    description: Write CycloneDX JSON to this path under METICULOUS_WORKSPACE (MAR parity).
+jobs:
+  - name: Scan
+    id: scan
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: trivy
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          MODE="${{ inputs.mode }}"
+          TARGET="${{ inputs.target }}"
+          OUT="${WS}/${{ inputs.cyclonedx_path }}"
+          case "${{ inputs.cyclonedx_path }}" in (*..*|/*) echo "bad cyclonedx path" >&2; exit 1;; esac
+          if ! command -v trivy >/dev/null 2>&1; then
+            echo "Install trivy on the agent (https://aquasecurity.github.io/trivy)." >&2
+            exit 1
+          fi
+          if [ "${MODE}" = "fs" ]; then
+            case "${TARGET}" in (*..*|/*) exit 1;; esac
+            trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL "${WS}/${TARGET}"
+            trivy fs --format cyclonedx --output "${OUT}" "${WS}/${TARGET}"
+          elif [ "${MODE}" = "image" ]; then
+            trivy image --scanners vuln,secret,misconfig --severity HIGH,CRITICAL "${TARGET}"
+            trivy image --format cyclonedx --output "${OUT}" "${TARGET}"
+          else
+            echo "mode must be fs or image" >&2
+            exit 1
+          fi

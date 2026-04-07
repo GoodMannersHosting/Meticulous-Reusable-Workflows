@@ -1,0 +1,26 @@
+# Agent: Docker or Podman with binfmt/qemu support (Linux). May require privileged agent or preinstalled qemu-user-static.
+# Uses tonistiigi/binfmt image when Docker is available.
+name: docker-setup-qemu
+version: "1.0.0"
+description: Register QEMU binfmt handlers for multi-arch builds (best-effort docker run).
+jobs:
+  - name: QEMU
+    id: qemu
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: binfmt
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            docker run --privileged --rm tonistiigi/binfmt --install all
+            echo "binfmt installed via docker"
+          elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+            podman run --privileged --rm docker.io/tonistiigi/binfmt --install all
+            echo "binfmt installed via podman"
+          else
+            echo "No usable docker/podman; install binfmt on the host or use a privileged agent." >&2
+            exit 1
+          fi
