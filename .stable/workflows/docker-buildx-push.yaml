@@ -4,8 +4,8 @@
 #
 # Outputs: set image_uri with `met-output var IMAGE_URI=...` after push when workflow outputs are enabled.
 name: docker-buildx-push
-version: "1.0.0"
-description: Detect docker/podman, buildx build with SBOM option, push image (MAR-style).
+version: "1.0.1"
+description: Detect docker/podman, buildx build with SBOM (Docker) or plain build (Podman), push image (MAR-style).
 inputs:
   context_path:
     type: string
@@ -78,10 +78,22 @@ jobs:
             exit 1
           fi
           ${ENG} buildx version >/dev/null 2>&1 || { echo "buildx required" >&2; exit 1; }
-          ${ENG} buildx build \
-            --platform "${{ inputs.buildx_platform }}" \
-            --file "${CTX}/${DF}" \
-            --sbom=true \
-            --push \
-            -t "${IMG}" \
-            "${CTX}"
+          PLATFORM="${{ inputs.buildx_platform }}"
+          # Docker buildx supports --push and BuildKit --sbom=true. Podman buildx does not implement
+          # --push (push in a second step) and uses --sbom <preset>, not --sbom=true.
+          if [ "${ENG}" = "podman" ]; then
+            ${ENG} buildx build \
+              --platform "${PLATFORM}" \
+              --file "${CTX}/${DF}" \
+              -t "${IMG}" \
+              "${CTX}"
+            ${ENG} push "${IMG}"
+          else
+            ${ENG} buildx build \
+              --platform "${PLATFORM}" \
+              --file "${CTX}/${DF}" \
+              --sbom=true \
+              --push \
+              -t "${IMG}" \
+              "${CTX}"
+          fi
