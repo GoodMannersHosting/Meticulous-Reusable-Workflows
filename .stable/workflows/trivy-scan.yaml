@@ -1,6 +1,6 @@
 # Agent: trivy on PATH or curl to install; Docker optional for image mode.
 name: trivy-scan
-version: "1.0.0"
+version: "1.1.0"
 description: Filesystem or image scan with Trivy; optional CycloneDX SBOM for Meticulous SBOM tab.
 inputs:
   mode:
@@ -16,7 +16,12 @@ inputs:
     type: string
     required: false
     default: "sbom.cdx.json"
-    description: Write CycloneDX JSON to this path under METICULOUS_WORKSPACE (MAR parity).
+    description: Write CycloneDX JSON to this path under METICULOUS_WORKSPACE (agent uploads this path as the run SBOM when it is sbom.cdx.json).
+  registry_host:
+    type: string
+    required: false
+    default: ""
+    description: For image mode only — if set with REGISTRY_USERNAME / REGISTRY_PASSWORD in job env (pipeline secrets), run docker login before trivy image scan so private registries resolve.
 jobs:
   - name: Scan
     id: scan
@@ -41,6 +46,17 @@ jobs:
             trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL "${WS}/${TARGET}"
             trivy fs --format cyclonedx --output "${OUT}" "${WS}/${TARGET}"
           elif [ "${MODE}" = "image" ]; then
+            REG_HOST="${{ inputs.registry_host }}"
+            if [ -n "${REG_HOST}" ] && [ -n "${REGISTRY_PASSWORD:-}" ]; then
+              if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+                echo "${REGISTRY_PASSWORD}" | docker login -u "${REGISTRY_USERNAME:-}" --password-stdin "${REG_HOST}"
+              elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+                echo "${REGISTRY_PASSWORD}" | podman login -u "${REGISTRY_USERNAME:-}" --password-stdin "${REG_HOST}"
+              else
+                echo "registry_host set but no working docker/podman for login" >&2
+                exit 1
+              fi
+            fi
             trivy image --scanners vuln,secret,misconfig --severity HIGH,CRITICAL "${TARGET}"
             trivy image --format cyclonedx --output "${OUT}" "${TARGET}"
           else

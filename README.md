@@ -94,9 +94,12 @@ For a **checkout → four image builds** loop covering **`Dockerfile.agent`**, *
 | `global/git-checkout`      | `git`, HTTPS egress to GitHub; optional `GITHUB_TOKEN` in **pipeline secrets** for private repos. |
 | `global/setup-rust`        | `curl`, `sh`; writes toolchain under the workspace (`RUSTUP_HOME` / `CARGO_HOME`). Use when running `cargo` *on the agent* (not required if Dockerfiles compile everything). |
 | `global/docker-buildx-push` | OCI-capable host: **Docker or Podman** with **buildx**; registry login via `REGISTRY_USERNAME` / `REGISTRY_PASSWORD` from **pipeline secrets**; egress to registry. See the probe snippet the workflow installs under `.meticulous_probe_docker_host.sh`. |
+| `global/trivy-scan`         | **`trivy` on PATH**; for `mode: image`, a working Docker/Podman if you set **`registry_host`** so the workflow can `login` with the same pipeline registry secrets before scanning private images. Writes CycloneDX to **`sbom.cdx.json`** (or `cyclonedx_path`) under `METICULOUS_WORKSPACE`; the agent sends that document to the control plane when the job completes. Catalog **1.1.0** adds optional **`registry_host`**. |
 | `global/run-script`        | `bash` or `sh`; executes only a **checked-in script path** under the workspace—add a repo script for `argocd`, `kubectl`, or Git ops deploy. |
 
-An illustrative pipeline lives at [`examples/meticulous-self-build.pipeline.yaml`](examples/meticulous-self-build.pipeline.yaml). Adjust `REGISTRY_PREFIX`, `IMAGE_TAG`, and `registry_host` inputs to match your registry.
+An illustrative pipeline lives at [`examples/meticulous-self-build.pipeline.yaml`](examples/meticulous-self-build.pipeline.yaml). It chains **checkout → build/push → Trivy image scan** per image so `agent-affinity.share-workspace` stays valid (total `depends-on` order) and each scan can write **`sbom.cdx.json`** without races. Re-import **`trivy-scan`** if your catalog still has **1.0.0**. Adjust `REGISTRY_PREFIX`, `IMAGE_TAG`, and registry inputs to match your environment.
+
+**Run SBOM tab:** `GET /api/v1/runs/{run_id}/sbom` returns the **first** SBOM artifact on the run (by `created_at`); multiple scan jobs in one run each still record SBOMs on their **job** status—see artifacts / job views if you need every image’s document in the UI.
 
 ## Crypto and secrets
 
