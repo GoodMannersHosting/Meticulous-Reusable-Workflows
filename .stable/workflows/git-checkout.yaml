@@ -1,12 +1,13 @@
 # Agent: Linux, git on PATH, network egress to clone host.
-# Optional: GITHUB_TOKEN (or host-specific token) in job env for private repos — inject via pipeline secrets, never commit.
+# Required: pipeline `secrets: GITHUB_TOKEN` (stored or other backend) so clones are non-interactive on GitHub.
+# Agents set GIT_TERMINAL_PROMPT=0; unauthenticated GitHub URLs are not used here.
 # Pool: default Linux tags below; override per org.
 #
 # When using workflow outputs, a follow-up step in the same job can run:
 #   met-output var CLONE_PATH="${SRC}"
 # so downstream jobs resolve ${{ workflows.<id>.outputs.CLONE_PATH }}.
 name: git-checkout
-version: "1.0.0"
+version: "1.0.1"
 description: Shallow clone a Git repository into the workspace (MAR/git-clone-snippet style).
 inputs:
   repo:
@@ -44,11 +45,11 @@ jobs:
           REF="${{ inputs.ref }}"
           REPO="${{ inputs.repo }}"
           echo "Cloning ${REPO} @ ${REF} into ${DEST}..."
-          if [ -n "${GITHUB_TOKEN:-}" ]; then
-            git clone --progress --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" "${DEST}"
-          else
-            git clone --progress --depth 1 "https://github.com/${REPO}.git" "${DEST}"
+          if [ -z "${GITHUB_TOKEN:-}" ]; then
+            echo "GITHUB_TOKEN is not set. Add pipeline secrets (e.g. secrets: GITHUB_TOKEN: stored: name: ...) so the agent can clone from GitHub without interactive prompts." >&2
+            exit 1
           fi
+          git clone --progress --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" "${DEST}"
           if [ "${REF}" != "HEAD" ]; then
             git -C "${DEST}" fetch --depth 1 origin "${REF}" && git -C "${DEST}" checkout FETCH_HEAD
           fi
