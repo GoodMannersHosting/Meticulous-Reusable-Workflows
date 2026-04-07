@@ -1,6 +1,6 @@
 # Agent: trivy on PATH or curl to install; Docker optional for image mode.
 name: trivy-scan
-version: "1.1.0"
+version: "1.1.1"
 description: Filesystem or image scan with Trivy; optional CycloneDX SBOM for Meticulous SBOM tab.
 inputs:
   mode:
@@ -43,7 +43,8 @@ jobs:
           fi
           if [ "${MODE}" = "fs" ]; then
             case "${TARGET}" in (*..*|/*) exit 1;; esac
-            trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL "${WS}/${TARGET}"
+            # Report HIGH/CRITICAL but do not fail the step (SBOM generation must still run).
+            trivy fs --exit-code 0 --scanners vuln,secret,misconfig --severity HIGH,CRITICAL "${WS}/${TARGET}"
             trivy fs --format cyclonedx --output "${OUT}" "${WS}/${TARGET}"
           elif [ "${MODE}" = "image" ]; then
             REG_HOST="${{ inputs.registry_host }}"
@@ -57,7 +58,7 @@ jobs:
                 exit 1
               fi
             fi
-            trivy image --scanners vuln,secret,misconfig --severity HIGH,CRITICAL "${TARGET}"
+            trivy image --exit-code 0 --scanners vuln,secret,misconfig --severity HIGH,CRITICAL "${TARGET}"
             trivy image --format cyclonedx --output "${OUT}" "${TARGET}"
           else
             echo "mode must be fs or image" >&2
