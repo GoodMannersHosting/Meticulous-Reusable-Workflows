@@ -85,6 +85,19 @@ Use `met-output secret ...` only for sensitive material; treat it according to p
 
 Each file under `.stable/workflows/` begins with a short comment block listing **agent prerequisites** (tools, optional Docker, pool hints). Default **`runs-on`** tags prefer **Linux** unless noted.
 
+### Meticulous self-build (validate against homelab stacks)
+
+For a **checkout → four image builds** loop covering **`Dockerfile.agent`**, **`Dockerfile.met-api`**, **`Dockerfile.met-controller`**, and **`Dockerfile.sqlx-migrate`** (same clone / workspace), combine:
+
+| Catalog workflow           | Agent needs |
+| -------------------------- | ----------- |
+| `global/git-checkout`      | `git`, HTTPS egress to GitHub; optional `GITHUB_TOKEN` in **pipeline secrets** for private repos. |
+| `global/setup-rust`        | `curl`, `sh`; writes toolchain under the workspace (`RUSTUP_HOME` / `CARGO_HOME`). Use when running `cargo` *on the agent* (not required if Dockerfiles compile everything). |
+| `global/docker-buildx-push` | OCI-capable host: **Docker or Podman** with **buildx**; registry login via `REGISTRY_USERNAME` / `REGISTRY_PASSWORD` from **pipeline secrets**; egress to registry. See the probe snippet the workflow installs under `.meticulous_probe_docker_host.sh`. |
+| `global/run-script`        | `bash` or `sh`; executes only a **checked-in script path** under the workspace—add a repo script for `argocd`, `kubectl`, or Git ops deploy. |
+
+An illustrative pipeline lives at [`examples/meticulous-self-build.pipeline.yaml`](examples/meticulous-self-build.pipeline.yaml). Adjust `REGISTRY_PREFIX`, `IMAGE_TAG`, and `registry_host` inputs to match your registry.
+
 ## Crypto and secrets
 
 Catalog YAML and this README use **placeholders** and pipeline **`secrets`** / stored credentials only. Do not commit API keys, passwords, or long-lived tokens into this repository. For encryption and algorithm expectations, follow the Meticulous control-plane crypto rules referenced from `design/workflow-invocation-outputs.md`.
