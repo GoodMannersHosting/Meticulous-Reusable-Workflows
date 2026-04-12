@@ -1,0 +1,95 @@
+# Bash/curl smoke tests against a running Meticulous API instance.
+# Verifies: health endpoint, login with admin credentials, token auth, basic CRUD (project create/list).
+#
+# Pipeline vars / met-output from meticulous-ci-seed:
+#   MET_CI_BASE_URL         — HTTP base URL (e.g. http://127.0.0.1:8081)
+#   MET_CI_TOKEN            — service-account API token
+#   MET_CI_ADMIN_PASSWORD   — bootstrap admin password
+name: api-smoke-test
+version: "1.0.0"
+description: Curl-based API health + auth + CRUD smoke checks against a Meticulous instance.
+inputs:
+  base_url:
+    type: string
+    required: false
+    default: ""
+    description: API base URL. Falls back to MET_CI_BASE_URL env var.
+  api_token:
+    type: string
+    required: false
+    default: ""
+    description: Service-account API token. Falls back to MET_CI_TOKEN env var.
+  admin_password:
+    type: string
+    required: false
+    default: ""
+    description: Admin password for password-based login test. Falls back to MET_CI_ADMIN_PASSWORD env var.
+jobs:
+  - name: Smoke
+    id: smoke
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: health check
+        run: |
+          set -euo pipefail
+          BASE="${{ inputs.base_url }}"
+          BASE="${BASE:-${MET_CI_BASE_URL:-}}"
+          if [ -z "${BASE}" ]; then
+            echo "base_url input or MET_CI_BASE_URL env var required" >&2
+            exit 1
+          fi
+          echo "==> GET ${BASE}/health"
+          curl -sf "${BASE}/health" | python3 -m json.tool
+      - name: password login
+        run: |
+          set -euo pipefail
+          BASE="${{ inputs.base_url }}"
+          BASE="${BASE:-${MET_CI_BASE_URL:-}}"
+          PW="${{ inputs.admin_password }}"
+          PW="${PW:-${MET_CI_ADMIN_PASSWORD:-ci-bootstrap}}"
+          echo "==> POST ${BASE}/auth/login"
+          RESP=$(curl -sf -X POST "${BASE}/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"admin\",\"password\":\"${PW}\"}")
+          echo "${RESP}" | python3 -m json.tool
+          TOKEN=$(echo "${RESP}" | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
+          if [ -z "${TOKEN}" ]; then
+            echo "Login did not return a token" >&2; exit 1
+          fi
+          echo "Login OK — JWT token received"
+      - name: api token auth + list projects
+        run: |
+          set -euo pipefail
+          BASE="${{ inputs.base_url }}"
+          BASE="${BASE:-${MET_CI_BASE_URL:-}}"
+          TOK="${{ inputs.api_token }}"
+          TOK="${TOK:-${MET_CI_TOKEN:-}}"
+          if [ -z "${TOK}" ]; then
+            echo "api_token input or MET_CI_TOKEN env var required" >&2
+            exit 1
+          fi
+          echo "==> GET ${BASE}/api/v1/projects"
+          curl -sf "${BASE}/api/v1/projects" \
+            -H "Authorization: Bearer ${TOK}" | python3 -m json.tool
+          echo "Project list OK"
+      - name: create + verify project
+        run: |
+          set -euo pipefail
+          BASE="${{ inputs.base_url }}"
+          BASE="${BASE:-${MET_CI_BASE_URL:-}}"
+          TOK="${{ inputs.api_token }}"
+          TOK="${TOK:-${MET_CI_TOKEN:-}}"
+          SLUG="smoke-test-$(date +%s)"
+          echo "==> POST ${BASE}/api/v1/projects (slug: ${SLUG})"
+          CREATED=$(curl -sf -X POST "${BASE}/api/v1/projects" \
+            -H "Authorization: Bearer ${TOK}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"name\":\"Smoke Test\",\"slug\":\"${SLUG}\"}")
+          echo "${CREATED}" | python3 -m json.tool
+          PROJECT_ID=$(echo "${CREATED}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+          echo "==> GET ${BASE}/api/v1/projects/${PROJECT_ID}"
+          curl -sf "${BASE}/api/v1/projects/${PROJECT_ID}" \
+            -H "Authorization: Bearer ${TOK}" | python3 -m json.tool
+          echo "Project CRUD OK"

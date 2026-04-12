@@ -1,0 +1,112 @@
+# Agent: Linux with podman (or docker), curl, sh.
+# Spins up postgres + nats via podman-compose (or docker compose), runs cargo test --workspace,
+# tears everything down even on failure.
+#
+# The compose file used is the repo's own docker-compose.yml; override with compose_file input
+# if your agent workspace has a different layout.
+#
+# Pipeline secrets injected into the job environment:
+#   DATABASE_URL — optional override; defaults to postgres://meticulous:meticulous@127.0.0.1:5432/meticulous
+#   NATS_URL     — optional override; defaults to nats://127.0.0.1:4222
+name: cargo-test
+version: "1.0.0"
+description: Spin up postgres+nats via compose, run cargo test --workspace, tear down.
+inputs:
+  rust_toolchain:
+    type: string
+    required: false
+    default: "stable"
+    description: Rust toolchain channel/version (matches setup-rust input).
+  rustup_home:
+    type: string
+    required: false
+    default: ".toolcache/rustup"
+    description: RUSTUP_HOME relative to workspace.
+  cargo_home:
+    type: string
+    required: false
+    default: ".toolcache/cargo"
+    description: CARGO_HOME relative to workspace.
+  workspace_path:
+    type: string
+    required: false
+    default: "."
+    description: Path to the Cargo workspace root relative to METICULOUS_WORKSPACE.
+  compose_file:
+    type: string
+    required: false
+    default: "docker-compose.yml"
+    description: Compose file path relative to workspace_path.
+  test_args:
+    type: string
+    required: false
+    default: "--workspace"
+    description: Extra arguments forwarded to cargo test.
+jobs:
+  - name: Test
+    id: test
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Start services
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          case "${{ inputs.workspace_path }}" in (*..*) exit 1;; esac
+          case "${{ inputs.compose_file }}" in (*..*) exit 1;; esac
+          PROJ="${WS}/${{ inputs.workspace_path }}"
+          CF="${PROJ}/${{ inputs.compose_file }}"
+          if ! [ -f "${CF}" ]; then
+            echo "Compose file not found: ${CF}" >&2
+            exit 1
+          fi
+          # Detect compose engine
+          if command -v podman-compose >/dev/null 2>&1; then
+            COMPOSE="podman-compose"
+          elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+            COMPOSE="docker compose"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            COMPOSE="docker-compose"
+          else
+            echo "No compose engine found (podman-compose or docker compose required)" >&2
+            exit 1
+          fi
+          echo "${COMPOSE}" > "${WS}/.meticulous_compose_engine"
+          cd "${PROJ}"
+          ${COMPOSE} -f "${{ inputs.compose_file }}" up -d postgres nats
+          echo "Waiting for postgres..."
+          for i in $(seq 1 30); do
+            if ${COMPOSE} -f "${{ inputs.compose_file }}" exec -T postgres pg_isready -U meticulous -d meticulous >/dev/null 2>&1; then
+              echo "postgres ready"
+              break
+            fi
+            sleep 2
+          done
+          echo "Waiting for nats..."
+          for i in $(seq 1 15); do
+            if ${COMPOSE} -f "${{ inputs.compose_file }}" exec -T nats wget -q --spider http://localhost:8222/healthz >/dev/null 2>&1; then
+              echo "nats ready"
+              break
+            fi
+            sleep 2
+          done
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          export RUSTUP_HOME="${WS}/${{ inputs.rustup_home }}"
+          export CARGO_HOME="${WS}/${{ inputs.cargo_home }}"
+          export PATH="${CARGO_HOME}/bin:${PATH}"
+          export DATABASE_URL="${DATABASE_URL:-postgres://meticulous:meticulous@127.0.0.1:5432/meticulous}"
+          export NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
+          cd "${WS}/${{ inputs.workspace_path }}"
+          cargo test ${{ inputs.test_args }}
+      - name: Tear down services
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          COMPOSE="$(cat "${WS}/.meticulous_compose_engine" 2>/dev/null || echo 'docker compose')"
+          PROJ="${WS}/${{ inputs.workspace_path }}"
+          cd "${PROJ}"
+          ${COMPOSE} -f "${{ inputs.compose_file }}" down -v || true

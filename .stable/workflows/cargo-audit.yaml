@@ -1,0 +1,49 @@
+# Agent: Linux with curl + sh. Downloads cargo-audit (or uses the binary on PATH via cargo_home
+# from a prior setup-rust step) and audits Cargo.lock for known CVEs.
+# Fails on any vulnerability at the configured deny level.
+name: cargo-audit
+version: "1.0.0"
+description: Audit Cargo.lock for known CVEs using cargo-audit.
+inputs:
+  cargo_home:
+    type: string
+    required: false
+    default: ".toolcache/cargo"
+    description: CARGO_HOME relative to workspace (must match setup-rust when used together).
+  workspace_path:
+    type: string
+    required: false
+    default: "."
+    description: Path to the Cargo workspace root relative to METICULOUS_WORKSPACE.
+  deny_warnings:
+    type: string
+    required: false
+    default: "false"
+    description: When "true", also fail on warnings (unmaintained, unsound) in addition to vulnerabilities.
+jobs:
+  - name: Audit
+    id: audit
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: cargo-audit
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          case "${{ inputs.workspace_path }}" in (*..*) exit 1;; esac
+          case "${{ inputs.cargo_home }}" in (*..*) exit 1;; esac
+          export CARGO_HOME="${WS}/${{ inputs.cargo_home }}"
+          export PATH="${CARGO_HOME}/bin:${PATH}"
+          cd "${WS}/${{ inputs.workspace_path }}"
+
+          if ! command -v cargo-audit >/dev/null 2>&1; then
+            echo "Installing cargo-audit..."
+            cargo install cargo-audit --locked
+          fi
+
+          ARGS=(audit)
+          if [ "${{ inputs.deny_warnings }}" = "true" ]; then
+            ARGS+=(--deny warnings)
+          fi
+          cargo "${ARGS[@]}"

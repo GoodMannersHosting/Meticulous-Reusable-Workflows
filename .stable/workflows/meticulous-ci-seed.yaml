@@ -1,0 +1,142 @@
+# Starts met-api in CI mode (MET_CI_MODE=true) against an already-running postgres+nats, seeds
+# fake data, and emits the bootstrap API token + admin password as met-output vars so subsequent
+# steps can use them.
+#
+# Requirements: met-api binary must be present in the workspace (built from source by a prior step)
+# OR the met-api container can be used via docker/podman if api_binary is set to "container".
+#
+# Pipeline secrets consumed from job environment:
+#   DATABASE_URL        — postgres connection string (default: postgres://meticulous:meticulous@127.0.0.1:5432/meticulous)
+#   MET_CI_BOOTSTRAP_PASSWORD — override the bootstrap admin password (default: ci-bootstrap)
+#
+# Outputs (via met-output var):
+#   MET_CI_BASE_URL    — HTTP base URL of the running API (e.g. http://127.0.0.1:8080)
+#   MET_CI_TOKEN       — service-account API token (plain text, shown once)
+#   MET_CI_ADMIN_PASSWORD — the bootstrap admin password used
+name: meticulous-ci-seed
+version: "1.0.0"
+description: Start met-api in CI mode, seed data, emit token + URL as met-output vars.
+inputs:
+  workspace_path:
+    type: string
+    required: false
+    default: "."
+    description: Path to the checked-out Meticulous repo root, relative to METICULOUS_WORKSPACE.
+  api_listen:
+    type: string
+    required: false
+    default: "127.0.0.1:8081"
+    description: Listen address for the ephemeral CI met-api instance.
+  startup_timeout_secs:
+    type: string
+    required: false
+    default: "30"
+    description: Seconds to wait for met-api to become healthy.
+  cargo_home:
+    type: string
+    required: false
+    default: ".toolcache/cargo"
+    description: CARGO_HOME relative to workspace (used to find the met-api binary).
+  rustup_home:
+    type: string
+    required: false
+    default: ".toolcache/rustup"
+    description: RUSTUP_HOME relative to workspace.
+jobs:
+  - name: Seed
+    id: seed
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Start CI met-api
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          case "${{ inputs.workspace_path }}" in (*..*) exit 1;; esac
+          PROJ="${WS}/${{ inputs.workspace_path }}"
+          export RUSTUP_HOME="${WS}/${{ inputs.rustup_home }}"
+          export CARGO_HOME="${WS}/${{ inputs.cargo_home }}"
+          export PATH="${CARGO_HOME}/bin:${PATH}"
+
+          DB_URL="${DATABASE_URL:-postgres://meticulous:meticulous@127.0.0.1:5432/meticulous}"
+          LISTEN="${{ inputs.api_listen }}"
+          BASE_URL="http://${LISTEN}"
+          TIMEOUT="${{ inputs.startup_timeout_secs }}"
+
+          # Find the met-api binary — prefer release build in the workspace, fall back to cargo run
+          API_BIN=""
+          for candidate in \
+            "${PROJ}/target/release/met-api" \
+            "${PROJ}/target/debug/met-api" \
+            "$(command -v met-api 2>/dev/null || true)"
+          do
+            if [ -x "${candidate}" ]; then
+              API_BIN="${candidate}"
+              break
+            fi
+          done
+
+          if [ -z "${API_BIN}" ]; then
+            echo "met-api binary not found; building with cargo..." >&2
+            cd "${PROJ}"
+            cargo build --bin met-api
+            API_BIN="${PROJ}/target/debug/met-api"
+          fi
+
+          # Write a minimal .env for the CI instance
+          CI_ENV="${WS}/.ci-api.env"
+          cat > "${CI_ENV}" <<EOF
+          MET_DATABASE_URL=${DB_URL}
+          MET_HTTP_ADDR=${LISTEN}
+          MET_CI_MODE=true
+          MET_CI_BOOTSTRAP_PASSWORD=${MET_CI_BOOTSTRAP_PASSWORD:-ci-bootstrap}
+          MET_HTTP__CORS_ALLOW_ANY=true
+          MET_API__RUN_MIGRATIONS=true
+          MET_JWT__SECRET=ci-only-jwt-secret-not-for-production
+          EOF
+
+          # Launch met-api in the background; capture PID for teardown
+          env $(grep -v '^#' "${CI_ENV}" | xargs) "${API_BIN}" > "${WS}/ci-api.log" 2>&1 &
+          API_PID=$!
+          echo "${API_PID}" > "${WS}/.ci-api.pid"
+          echo "met-api started (pid ${API_PID}) at ${BASE_URL}"
+
+          # Wait for health endpoint
+          for i in $(seq 1 "${TIMEOUT}"); do
+            if curl -sf "${BASE_URL}/health" >/dev/null 2>&1; then
+              echo "met-api healthy after ${i}s"
+              break
+            fi
+            if ! kill -0 "${API_PID}" 2>/dev/null; then
+              echo "met-api process died — last log:" >&2
+              tail -30 "${WS}/ci-api.log" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if ! curl -sf "${BASE_URL}/health" >/dev/null 2>&1; then
+            echo "met-api did not become healthy within ${TIMEOUT}s" >&2
+            tail -30 "${WS}/ci-api.log" >&2
+            kill "${API_PID}" 2>/dev/null || true
+            exit 1
+          fi
+
+          # Extract the token from the log (CI bootstrap prints MET_CI_TOKEN=... and MET_CI_ADMIN_PASSWORD=...)
+          CI_TOKEN=$(grep '^MET_CI_TOKEN=' "${WS}/ci-api.log" | head -1 | cut -d= -f2- || true)
+          CI_ADMIN_PW=$(grep '^MET_CI_ADMIN_PASSWORD=' "${WS}/ci-api.log" | head -1 | cut -d= -f2- || true)
+
+          if [ -z "${CI_TOKEN}" ]; then
+            echo "WARNING: MET_CI_TOKEN not found in log (org may already exist — skipping seed). Checking..." >&2
+            # If org already existed, the token won't be printed; the caller must supply it via pipeline var
+          fi
+
+          # Emit met-output vars for downstream steps
+          met-output var MET_CI_BASE_URL="${BASE_URL}" 2>/dev/null || echo "MET_CI_BASE_URL=${BASE_URL}"
+          if [ -n "${CI_TOKEN}" ]; then
+            met-output var MET_CI_TOKEN="${CI_TOKEN}" 2>/dev/null || echo "MET_CI_TOKEN=${CI_TOKEN}"
+          fi
+          if [ -n "${CI_ADMIN_PW}" ]; then
+            met-output var MET_CI_ADMIN_PASSWORD="${CI_ADMIN_PW}" 2>/dev/null || echo "MET_CI_ADMIN_PASSWORD=${CI_ADMIN_PW}"
+          fi

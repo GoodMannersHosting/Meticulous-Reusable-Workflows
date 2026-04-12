@@ -1,0 +1,64 @@
+# Agent: Linux with curl + sh (rustup installs under workspace via setup-rust pattern).
+# Run cargo fmt --check, cargo clippy -D warnings, and cargo check --workspace.
+# Depends on a prior setup-rust invocation sharing the same workspace (agent-affinity).
+name: cargo-lint
+version: "1.0.0"
+description: Run cargo fmt, clippy, and check on a Rust workspace.
+inputs:
+  rust_toolchain:
+    type: string
+    required: false
+    default: "stable"
+    description: Rust toolchain channel/version (matches setup-rust input).
+  rustup_home:
+    type: string
+    required: false
+    default: ".toolcache/rustup"
+    description: RUSTUP_HOME relative to workspace (must match setup-rust).
+  cargo_home:
+    type: string
+    required: false
+    default: ".toolcache/cargo"
+    description: CARGO_HOME relative to workspace (must match setup-rust).
+  workspace_path:
+    type: string
+    required: false
+    default: "."
+    description: Path to the Cargo workspace root relative to METICULOUS_WORKSPACE.
+jobs:
+  - name: Lint
+    id: lint
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: fmt check
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          case "${{ inputs.workspace_path }}" in (*..*) exit 1;; esac
+          case "${{ inputs.rustup_home }}" in (*..*) exit 1;; esac
+          case "${{ inputs.cargo_home }}" in (*..*) exit 1;; esac
+          export RUSTUP_HOME="${WS}/${{ inputs.rustup_home }}"
+          export CARGO_HOME="${WS}/${{ inputs.cargo_home }}"
+          export PATH="${CARGO_HOME}/bin:${PATH}"
+          cd "${WS}/${{ inputs.workspace_path }}"
+          cargo fmt --all -- --check
+      - name: clippy
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          export RUSTUP_HOME="${WS}/${{ inputs.rustup_home }}"
+          export CARGO_HOME="${WS}/${{ inputs.cargo_home }}"
+          export PATH="${CARGO_HOME}/bin:${PATH}"
+          cd "${WS}/${{ inputs.workspace_path }}"
+          cargo clippy --workspace -- -D warnings
+      - name: check
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          export RUSTUP_HOME="${WS}/${{ inputs.rustup_home }}"
+          export CARGO_HOME="${WS}/${{ inputs.cargo_home }}"
+          export PATH="${CARGO_HOME}/bin:${PATH}"
+          cd "${WS}/${{ inputs.workspace_path }}"
+          cargo check --workspace

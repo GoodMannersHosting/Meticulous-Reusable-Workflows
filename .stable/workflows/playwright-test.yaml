@@ -1,0 +1,102 @@
+# Agent: Linux with Node.js (node + npm/npx) and the Meticulous frontend checked out.
+# Installs Playwright and its browsers, then runs the test suite against a live API instance.
+#
+# Requires a running Meticulous API (e.g. started by meticulous-ci-seed) and the frontend
+# built and served (or served via Vite dev server from the workspace).
+#
+# Pipeline vars (from meticulous-ci-seed outputs):
+#   MET_CI_BASE_URL       — API base URL
+#   MET_CI_TOKEN          — service-account API token
+#   MET_CI_ADMIN_PASSWORD — bootstrap admin password
+name: playwright-test
+version: "1.0.0"
+description: Run Playwright E2E tests against a live Meticulous frontend + API instance.
+inputs:
+  workspace_path:
+    type: string
+    required: false
+    default: "."
+    description: Path to the checked-out Meticulous repo root, relative to METICULOUS_WORKSPACE.
+  frontend_path:
+    type: string
+    required: false
+    default: "frontend"
+    description: Subdirectory of workspace_path containing the SvelteKit frontend.
+  base_url:
+    type: string
+    required: false
+    default: ""
+    description: Frontend base URL for Playwright. Defaults to MET_CI_BASE_URL env var.
+  test_pattern:
+    type: string
+    required: false
+    default: ""
+    description: Optional Playwright test file glob (e.g. tests/auth.spec.ts). Empty = all tests.
+  node_version:
+    type: string
+    required: false
+    default: "20"
+    description: Node.js major version to install if node is not on PATH.
+  report_dir:
+    type: string
+    required: false
+    default: "playwright-report"
+    description: Output directory for the HTML report relative to METICULOUS_WORKSPACE.
+jobs:
+  - name: E2E
+    id: e2e
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Ensure Node.js
+        run: |
+          set -euo pipefail
+          if command -v node >/dev/null 2>&1; then
+            echo "Node.js $(node --version) already on PATH"
+            exit 0
+          fi
+          echo "Installing Node.js ${{ inputs.node_version }} via nvm..."
+          curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+          # shellcheck disable=SC1090
+          . "${HOME}/.nvm/nvm.sh"
+          nvm install "${{ inputs.node_version }}"
+          nvm use "${{ inputs.node_version }}"
+          node --version
+      - name: Install dependencies + Playwright
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          case "${{ inputs.workspace_path }}" in (*..*) exit 1;; esac
+          case "${{ inputs.frontend_path }}" in (*..*) exit 1;; esac
+          # Source nvm if needed
+          [ -f "${HOME}/.nvm/nvm.sh" ] && . "${HOME}/.nvm/nvm.sh" || true
+          FRONTEND="${WS}/${{ inputs.workspace_path }}/${{ inputs.frontend_path }}"
+          cd "${FRONTEND}"
+          npm ci
+          # Install Playwright if it's a dependency, otherwise install it globally
+          if grep -q '"@playwright/test"' package.json 2>/dev/null; then
+            npx playwright install --with-deps chromium
+          else
+            npm install -D @playwright/test
+            npx playwright install --with-deps chromium
+          fi
+      - name: Run Playwright tests
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          [ -f "${HOME}/.nvm/nvm.sh" ] && . "${HOME}/.nvm/nvm.sh" || true
+          FRONTEND="${WS}/${{ inputs.workspace_path }}/${{ inputs.frontend_path }}"
+          BASE="${{ inputs.base_url }}"
+          BASE="${BASE:-${MET_CI_BASE_URL:-http://127.0.0.1:8081}}"
+          REPORT="${WS}/${{ inputs.report_dir }}"
+          mkdir -p "${REPORT}"
+          cd "${FRONTEND}"
+          PATTERN="${{ inputs.test_pattern }}"
+          ARGS=(--reporter=html "--output=${REPORT}")
+          [ -n "${PATTERN}" ] && ARGS+=("${PATTERN}")
+          # Pass credentials via environment
+          PUBLIC_API_URL="${BASE}" \
+          MET_CI_TOKEN="${MET_CI_TOKEN:-}" \
+          MET_CI_ADMIN_PASSWORD="${MET_CI_ADMIN_PASSWORD:-ci-bootstrap}" \
+            npx playwright test "${ARGS[@]}"

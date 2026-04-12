@@ -1,0 +1,130 @@
+# Rolling restart of Meticulous Kubernetes deployments with health polling and automatic rollback.
+#
+# Pipeline secret required:
+#   KUBECONFIG_B64 — base64-encoded kubeconfig with access to the target cluster.
+#
+# The step:
+#   1. Writes the kubeconfig from KUBECONFIG_B64 secret.
+#   2. Runs `kubectl rollout restart` for each deployment.
+#   3. Polls `kubectl rollout status` with a configurable timeout.
+#   4. On timeout or error, runs `kubectl rollout undo` and exits non-zero.
+#   5. Optionally polls a health HTTP endpoint after the rollout succeeds.
+name: kubectl-deploy
+version: "1.0.0"
+description: Rolling restart of Kubernetes deployments with health poll and automatic rollback.
+inputs:
+  namespace:
+    type: string
+    required: false
+    default: "meticulous"
+    description: Kubernetes namespace containing the deployments.
+  deployments:
+    type: string
+    required: false
+    default: "met-api met-controller met-frontend"
+    description: Space-separated list of deployment names to restart.
+  rollout_timeout:
+    type: string
+    required: false
+    default: "180s"
+    description: Timeout for kubectl rollout status (e.g. 180s, 5m).
+  health_url:
+    type: string
+    required: false
+    default: ""
+    description: Optional HTTP URL to poll after rollout (e.g. https://meticulous.example.com/health).
+  health_timeout_secs:
+    type: string
+    required: false
+    default: "60"
+    description: Seconds to wait for health_url to return 200 after rollout.
+  kubectl_version:
+    type: string
+    required: false
+    default: "1.30.0"
+    description: kubectl version to download if not already on PATH.
+jobs:
+  - name: Deploy
+    id: deploy
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Setup kubectl
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          if command -v kubectl >/dev/null 2>&1; then
+            echo "kubectl $(kubectl version --client --short 2>/dev/null || kubectl version --client) already on PATH"
+            exit 0
+          fi
+          VER="${{ inputs.kubectl_version }}"
+          ARCH="$(uname -m)"
+          case "${ARCH}" in (x86_64) ARCH=amd64;; (aarch64) ARCH=arm64;; (*) echo "Unsupported arch" >&2; exit 1;; esac
+          URL="https://dl.k8s.io/release/v${VER}/bin/linux/${ARCH}/kubectl"
+          echo "Downloading kubectl ${VER}..."
+          curl -fsSL "${URL}" -o "${WS}/.toolcache/kubectl"
+          chmod +x "${WS}/.toolcache/kubectl"
+          export PATH="${WS}/.toolcache:${PATH}"
+          echo "kubectl $(kubectl version --client --short 2>/dev/null || true)"
+          echo "${WS}/.toolcache" >> "${WS}/.meticulous_path_prefix" || true
+      - name: Configure kubeconfig
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          if [ -z "${KUBECONFIG_B64:-}" ]; then
+            echo "KUBECONFIG_B64 pipeline secret is required" >&2
+            exit 1
+          fi
+          mkdir -p "${WS}/.kube"
+          echo "${KUBECONFIG_B64}" | base64 -d > "${WS}/.kube/config"
+          chmod 600 "${WS}/.kube/config"
+          export KUBECONFIG="${WS}/.kube/config"
+          export PATH="${WS}/.toolcache:${PATH}"
+          kubectl cluster-info --request-timeout=10s
+      - name: Rollout restart
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          export KUBECONFIG="${WS}/.kube/config"
+          export PATH="${WS}/.toolcache:${PATH}"
+          NS="${{ inputs.namespace }}"
+          DEPLOYMENTS="${{ inputs.deployments }}"
+          TIMEOUT="${{ inputs.rollout_timeout }}"
+          FAILED_DEPS=()
+          for DEP in ${DEPLOYMENTS}; do
+            echo "==> kubectl rollout restart deployment/${DEP} -n ${NS}"
+            kubectl rollout restart "deployment/${DEP}" -n "${NS}"
+          done
+          for DEP in ${DEPLOYMENTS}; do
+            echo "==> kubectl rollout status deployment/${DEP} -n ${NS} --timeout=${TIMEOUT}"
+            if ! kubectl rollout status "deployment/${DEP}" -n "${NS}" --timeout="${TIMEOUT}"; then
+              echo "Rollout failed for ${DEP} — rolling back..." >&2
+              kubectl rollout undo "deployment/${DEP}" -n "${NS}" || true
+              FAILED_DEPS+=("${DEP}")
+            fi
+          done
+          if [ "${#FAILED_DEPS[@]}" -gt 0 ]; then
+            echo "Rollout failed for: ${FAILED_DEPS[*]}" >&2
+            exit 1
+          fi
+          echo "All deployments rolled out successfully."
+      - name: Health check
+        run: |
+          set -euo pipefail
+          HEALTH_URL="${{ inputs.health_url }}"
+          if [ -z "${HEALTH_URL}" ]; then
+            echo "No health_url configured — skipping post-rollout health check."
+            exit 0
+          fi
+          TIMEOUT="${{ inputs.health_timeout_secs }}"
+          echo "Waiting up to ${TIMEOUT}s for ${HEALTH_URL} to return 200..."
+          for i in $(seq 1 "${TIMEOUT}"); do
+            if curl -sf "${HEALTH_URL}" >/dev/null 2>&1; then
+              echo "Health check passed after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Health check timed out after ${TIMEOUT}s: ${HEALTH_URL}" >&2
+          exit 1

@@ -1,0 +1,100 @@
+# Agent: Linux. Runs Opengrep (OSS SAST, LGPL-2.1 fork of Semgrep) via its self-contained binary.
+# Results are written to opengrep-report.json in the workspace root.
+# Fails on any finding when fail_on_findings is true.
+#
+# No account, API token, or container engine required.
+name: opengrep
+version: "1.0.0"
+description: OSS SAST via Opengrep binary — no account or container engine required.
+inputs:
+  scan_path:
+    type: string
+    required: false
+    default: "."
+    description: Path relative to workspace to scan (no ..).
+  config:
+    type: string
+    required: false
+    default: "auto"
+    description: Opengrep ruleset (auto, p/rust, p/security-audit, or path to local rules).
+  output_file:
+    type: string
+    required: false
+    default: "opengrep-report.json"
+    description: Output JSON report filename relative to METICULOUS_WORKSPACE.
+  fail_on_findings:
+    type: string
+    required: false
+    default: "true"
+    description: Exit non-zero when findings are found.
+  version:
+    type: string
+    required: false
+    default: "latest"
+    description: Opengrep release tag to install (e.g. v1.16.5). Defaults to latest.
+jobs:
+  - name: Scan
+    id: scan
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Install opengrep
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          INSTALL_DIR="${WS}/.opengrep-bin"
+          mkdir -p "${INSTALL_DIR}"
+
+          VERSION="${{ inputs.version }}"
+          if [ "${VERSION}" = "latest" ]; then
+            DOWNLOAD_URL="https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh"
+            curl -fsSL "${DOWNLOAD_URL}" | INSTALL_DIR="${INSTALL_DIR}" bash
+          else
+            # Resolve the binary for the requested version directly from GitHub releases.
+            ARCH="$(uname -m)"
+            case "${ARCH}" in
+              x86_64)  ARCH_TAG="x86_64-unknown-linux-musl" ;;
+              aarch64) ARCH_TAG="aarch64-unknown-linux-musl" ;;
+              *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;;
+            esac
+            BINARY_URL="https://github.com/opengrep/opengrep/releases/download/${VERSION}/opengrep-${ARCH_TAG}"
+            curl -fsSL "${BINARY_URL}" -o "${INSTALL_DIR}/opengrep"
+            chmod +x "${INSTALL_DIR}/opengrep"
+          fi
+
+          # Verify the binary is runnable
+          "${INSTALL_DIR}/opengrep" --version
+          echo "OPENGREP_BIN=${INSTALL_DIR}/opengrep" >> "${METICULOUS_ENV}"
+
+      - name: Opengrep scan
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          case "${{ inputs.scan_path }}" in (*..*) exit 1;; esac
+          case "${{ inputs.output_file }}" in (*..*) exit 1;; esac
+
+          SCAN="${WS}/${{ inputs.scan_path }}"
+          OUT="${WS}/${{ inputs.output_file }}"
+          FAIL="${{ inputs.fail_on_findings }}"
+
+          # Run opengrep; capture exit code so we can write the report first.
+          set +e
+          "${OPENGREP_BIN}" scan \
+            --config "${{ inputs.config }}" \
+            --json \
+            --output "${OUT}" \
+            "${SCAN}"
+          EXIT_CODE=$?
+          set -e
+
+          if [ -f "${OUT}" ]; then
+            FINDINGS=$(python3 -c "import json,sys; d=json.load(open('${OUT}')); print(len(d.get('results',[])))" 2>/dev/null || echo "?")
+            echo "Opengrep findings: ${FINDINGS}"
+          fi
+
+          if [ "${FAIL}" = "true" ] && [ "${EXIT_CODE}" -ne 0 ]; then
+            echo "Opengrep found issues. Review ${OUT} for details." >&2
+            exit "${EXIT_CODE}"
+          fi
+          exit 0

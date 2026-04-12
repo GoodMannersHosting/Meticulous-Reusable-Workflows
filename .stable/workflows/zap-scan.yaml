@@ -1,0 +1,117 @@
+# DAST scan using OWASP ZAP in baseline mode against a running Meticulous API instance.
+# Writes zap-report.html (HTML) and zap-report.json (JSON) to METICULOUS_WORKSPACE.
+#
+# Baseline mode: spider + passive scan only — no active attack. Safe to run against dev/CI instances.
+# Use zap_target to point at the API base URL or the frontend URL.
+#
+# Agent: Linux with docker or podman.
+name: zap-scan
+version: "1.0.0"
+description: OWASP ZAP baseline DAST scan; writes zap-report.html artifact.
+inputs:
+  target_url:
+    type: string
+    required: false
+    default: ""
+    description: URL to scan. Falls back to MET_CI_BASE_URL env var.
+  zap_image:
+    type: string
+    required: false
+    default: "ghcr.io/zaproxy/zaproxy:stable"
+    description: ZAP Docker image to use.
+  scan_minutes:
+    type: string
+    required: false
+    default: "2"
+    description: Maximum spider duration in minutes for baseline scan (-m flag).
+  fail_on_warn:
+    type: string
+    required: false
+    default: "false"
+    description: When "true", exit non-zero on WARN or higher findings (not just FAIL).
+  report_html:
+    type: string
+    required: false
+    default: "zap-report.html"
+    description: HTML report filename relative to METICULOUS_WORKSPACE.
+  report_json:
+    type: string
+    required: false
+    default: "zap-report.json"
+    description: JSON report filename relative to METICULOUS_WORKSPACE.
+jobs:
+  - name: DAST
+    id: dast
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Engine probe
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          {
+            echo 'if [ -z "${DOCKER_HOST-}" ]; then'
+            echo '  for sock in /var/run/meticulous-dind/docker.sock /var/run/docker.sock; do'
+            echo '    [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break'
+            echo '  done'
+            echo 'fi'
+          } > "${WS}/.meticulous_probe_docker_host.sh"
+          # shellcheck disable=SC1091
+          . "${WS}/.meticulous_probe_docker_host.sh"
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            echo docker > "${WS}/.meticulous_container_engine"
+          elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+            echo podman > "${WS}/.meticulous_container_engine"
+          else
+            echo "zap-scan requires docker or podman with a working engine." >&2
+            exit 1
+          fi
+      - name: Run ZAP baseline
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          # shellcheck disable=SC1091
+          . "${WS}/.meticulous_probe_docker_host.sh"
+          ENG="$(cat "${WS}/.meticulous_container_engine")"
+          TARGET="${{ inputs.target_url }}"
+          TARGET="${TARGET:-${MET_CI_BASE_URL:-}}"
+          if [ -z "${TARGET}" ]; then
+            echo "target_url input or MET_CI_BASE_URL env var required" >&2
+            exit 1
+          fi
+          case "${{ inputs.report_html }}" in (*..*) exit 1;; esac
+          case "${{ inputs.report_json }}" in (*..*) exit 1;; esac
+          HTML_OUT="${WS}/${{ inputs.report_html }}"
+          JSON_OUT="${WS}/${{ inputs.report_json }}"
+          MINS="${{ inputs.scan_minutes }}"
+          FAIL_OPT=""
+          [ "${{ inputs.fail_on_warn }}" = "true" ] && FAIL_OPT="-I" || FAIL_OPT=""
+          # ZAP baseline exits 1 on WARN, 2 on FAIL — we handle both.
+          set +e
+          "${ENG}" run --rm \
+            --network host \
+            -v "${WS}:/zap/wrk:rw" \
+            "${{ inputs.zap_image }}" \
+            zap-baseline.py \
+              -t "${TARGET}" \
+              -m "${MINS}" \
+              -r "${{ inputs.report_html }}" \
+              -J "${{ inputs.report_json }}" \
+              ${FAIL_OPT}
+          ZAP_EXIT=$?
+          set -e
+          echo "ZAP exit code: ${ZAP_EXIT}"
+          [ -f "${HTML_OUT}" ] && echo "HTML report: ${HTML_OUT}"
+          [ -f "${JSON_OUT}" ] && echo "JSON report: ${JSON_OUT}"
+          # Exit code 2 = FAIL-level findings; always propagate
+          if [ "${ZAP_EXIT}" -ge 2 ]; then
+            echo "ZAP found FAIL-level issues." >&2
+            exit "${ZAP_EXIT}"
+          fi
+          # Exit code 1 = WARN-level; propagate only if fail_on_warn=true
+          if [ "${ZAP_EXIT}" -eq 1 ] && [ "${{ inputs.fail_on_warn }}" = "true" ]; then
+            echo "ZAP found WARN-level issues and fail_on_warn=true." >&2
+            exit 1
+          fi
+          exit 0

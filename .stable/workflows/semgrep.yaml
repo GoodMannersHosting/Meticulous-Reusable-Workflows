@@ -1,0 +1,95 @@
+# Agent: Linux with docker or podman. Runs Semgrep OSS via the official container image for
+# static analysis. Results are written to semgrep-report.json in the workspace root.
+# Fails on any finding at the configured severity level (default: ERROR).
+#
+# No Semgrep account or API token is required — uses semgrep/semgrep:latest from Docker Hub.
+name: semgrep
+version: "1.0.0"
+description: OSS SAST via Semgrep container — no account required.
+inputs:
+  scan_path:
+    type: string
+    required: false
+    default: "."
+    description: Path relative to workspace to scan (no ..).
+  config:
+    type: string
+    required: false
+    default: "auto"
+    description: Semgrep ruleset (auto, p/rust, p/security-audit, or path to local rules).
+  output_file:
+    type: string
+    required: false
+    default: "semgrep-report.json"
+    description: Output JSON report filename relative to METICULOUS_WORKSPACE.
+  fail_on_findings:
+    type: string
+    required: false
+    default: "true"
+    description: Exit non-zero when findings are found.
+jobs:
+  - name: Scan
+    id: scan
+    runs-on:
+      tags:
+        - os: linux
+    steps:
+      - name: Engine probe
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          ENGINE_FILE="${WS}/.meticulous_container_engine"
+          {
+            echo 'if [ -z "${DOCKER_HOST-}" ]; then'
+            echo '  for sock in /var/run/meticulous-dind/docker.sock /var/run/docker.sock; do'
+            echo '    [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break'
+            echo '  done'
+            echo 'fi'
+          } > "${WS}/.meticulous_probe_docker_host.sh"
+          # shellcheck disable=SC1091
+          . "${WS}/.meticulous_probe_docker_host.sh"
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            echo docker > "${ENGINE_FILE}"
+          elif command -v podman >/dev/null 2>&1 && podman info >/dev/null 2>&1; then
+            echo podman > "${ENGINE_FILE}"
+          else
+            echo "semgrep workflow requires docker or podman with a working engine." >&2
+            exit 1
+          fi
+      - name: semgrep scan
+        run: |
+          set -euo pipefail
+          WS="${METICULOUS_WORKSPACE:?}"
+          case "${{ inputs.scan_path }}" in (*..*) exit 1;; esac
+          case "${{ inputs.output_file }}" in (*..*) exit 1;; esac
+          # shellcheck disable=SC1091
+          . "${WS}/.meticulous_probe_docker_host.sh"
+          ENG="$(cat "${WS}/.meticulous_container_engine")"
+          SCAN="${WS}/${{ inputs.scan_path }}"
+          OUT="${WS}/${{ inputs.output_file }}"
+          FAIL="${{ inputs.fail_on_findings }}"
+
+          # Run semgrep; capture exit code separately so we can write the report first
+          set +e
+          "${ENG}" run --rm \
+            -v "${SCAN}:/src:ro" \
+            -v "${WS}:/out" \
+            semgrep/semgrep:latest \
+            semgrep scan \
+              --config "${{ inputs.config }}" \
+              --json \
+              --output /out/"${{ inputs.output_file }}" \
+              /src
+          EXIT_CODE=$?
+          set -e
+
+          if [ -f "${OUT}" ]; then
+            FINDINGS=$(python3 -c "import json,sys; d=json.load(open('${OUT}')); print(len(d.get('results',[])) )" 2>/dev/null || echo "?")
+            echo "Semgrep findings: ${FINDINGS}"
+          fi
+
+          if [ "${FAIL}" = "true" ] && [ "${EXIT_CODE}" -ne 0 ]; then
+            echo "Semgrep found issues. Review ${OUT} for details." >&2
+            exit "${EXIT_CODE}"
+          fi
+          exit 0
