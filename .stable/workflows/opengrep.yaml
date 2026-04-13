@@ -4,7 +4,7 @@
 #
 # No account, API token, or container engine required.
 name: opengrep
-version: "1.1.0"
+version: "1.1.1"
 description: OSS SAST via Opengrep binary — no account or container engine required.
 inputs:
   scan_path:
@@ -80,12 +80,18 @@ jobs:
           fi
 
           "${INSTALL_DIR}/opengrep" --version
-          echo "OPENGREP_BIN=${INSTALL_DIR}/opengrep" >> "${METICULOUS_ENV}"
 
       - name: Opengrep scan
         run: |
           set -euo pipefail
           WS="${METICULOUS_WORKSPACE:?}"
+          # Meticulous does not set METICULOUS_ENV between steps (unlike GITHUB_ENV). Use the same
+          # install path as the previous step.
+          OPENGREP_BIN="${WS}/.opengrep-bin/opengrep"
+          if [ ! -x "${OPENGREP_BIN}" ]; then
+            echo "opengrep binary missing at ${OPENGREP_BIN}; install step must run first" >&2
+            exit 1
+          fi
           case "${{ inputs.scan_path }}" in (*..*) exit 1;; esac
           case "${{ inputs.output_file }}" in (*..*) exit 1;; esac
 
