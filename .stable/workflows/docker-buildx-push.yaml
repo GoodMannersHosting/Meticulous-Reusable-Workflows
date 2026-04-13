@@ -4,7 +4,7 @@
 #
 # Outputs: set image_uri with `met-output var IMAGE_URI=...` after push when workflow outputs are enabled.
 name: docker-buildx-push
-version: "1.0.1"
+version: "1.0.2"
 description: Detect docker/podman, buildx build with SBOM (Docker) or plain build (Podman), push image (MAR-style).
 inputs:
   context_path:
@@ -33,9 +33,6 @@ inputs:
 jobs:
   - name: Build push
     id: publish
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Engine probe
         run: |
@@ -44,9 +41,18 @@ jobs:
           ENGINE_FILE="${WS}/.meticulous_container_engine"
           {
             echo 'if [ -z "${DOCKER_HOST-}" ]; then'
-            echo '  for sock in /var/run/meticulous-dind/docker.sock /var/run/docker.sock; do'
-            echo '    [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break'
-            echo '  done'
+            echo '  case "$(uname -s)" in'
+            echo '    Linux)'
+            echo '      for sock in /var/run/meticulous-dind/docker.sock /var/run/docker.sock; do'
+            echo '        [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break'
+            echo '      done'
+            echo '      ;;'
+            echo '    Darwin)'
+            echo '      for sock in "${HOME}/.docker/run/docker.sock" /var/run/docker.sock; do'
+            echo '        [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break'
+            echo '      done'
+            echo '      ;;'
+            echo '  esac'
             echo 'fi'
           } > "${WS}/.meticulous_probe_docker_host.sh"
           # shellcheck disable=SC1091

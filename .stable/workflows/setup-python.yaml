@@ -1,8 +1,8 @@
-# Agent: curl or HTTPS access, Linux x86_64. Uses official python-build-standalone indygreg install pattern.
+# Agent: curl or HTTPS access. Linux or macOS via python-build-standalone (indygreg) install_only tarballs.
 # TOOL_VERSION: set via inputs.python_version (e.g. 3.12.7).
 # For multi-step jobs, after setup you may propagate paths with met-output var PY_HOME=... (when platform supports outputs).
 name: setup-python
-version: "1.0.0"
+version: "1.1.0"
 description: Install a standalone CPython into the workspace (pinned version).
 inputs:
   python_version:
@@ -18,9 +18,6 @@ inputs:
 jobs:
   - name: Setup
     id: setup
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Install CPython
         run: |
@@ -31,9 +28,27 @@ jobs:
           case "${ROOT}" in (*..*) echo "invalid install_root" >&2; exit 1;; esac
           DEST="${WS}/${ROOT}"
           mkdir -p "${DEST}"
+          STANDALONE_RELEASE="20241016"
+          UNAME_S="$(uname -s)"
           ARCH="$(uname -m)"
-          case "${ARCH}" in (x86_64) ARCH2=x86_64;; (aarch64) ARCH2=aarch64;; (*) echo "unsupported arch ${ARCH}" >&2; exit 1;; esac
-          URL="https://github.com/indygreg/python-build-standalone/releases/download/20241016/cpython-${VER}+20241016-${ARCH2}-unknown-linux-gnu-install_only.tar.gz"
+          case "${UNAME_S}" in
+            Linux)
+              case "${ARCH}" in
+                x86_64) TRIPLET="x86_64-unknown-linux-gnu" ;;
+                aarch64) TRIPLET="aarch64-unknown-linux-gnu" ;;
+                *) echo "unsupported arch ${ARCH}" >&2; exit 1 ;;
+              esac
+              ;;
+            Darwin)
+              case "${ARCH}" in
+                x86_64) TRIPLET="x86_64-apple-darwin" ;;
+                arm64|aarch64) TRIPLET="aarch64-apple-darwin" ;;
+                *) echo "unsupported arch ${ARCH}" >&2; exit 1 ;;
+              esac
+              ;;
+            *) echo "unsupported OS ${UNAME_S}" >&2; exit 1 ;;
+          esac
+          URL="https://github.com/indygreg/python-build-standalone/releases/download/${STANDALONE_RELEASE}/cpython-${VER}+${STANDALONE_RELEASE}-${TRIPLET}-install_only.tar.gz"
           echo "Downloading ${URL}..."
           curl -fsSL "${URL}" -o /tmp/py.tgz
           tar -xzf /tmp/py.tgz -C "${DEST}" --strip-components=1

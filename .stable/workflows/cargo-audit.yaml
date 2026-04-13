@@ -1,8 +1,8 @@
-# Agent: Linux with curl + sh. Downloads cargo-audit (or uses the binary on PATH via cargo_home
+# Agent: curl + sh. Downloads cargo-audit (or uses the binary on PATH via cargo_home
 # from a prior setup-rust step) and audits Cargo.lock for known CVEs.
 # Fails on any vulnerability at the configured deny level.
 name: cargo-audit
-version: "1.0.0"
+version: "1.0.1"
 description: Audit Cargo.lock for known CVEs using cargo-audit.
 inputs:
   cargo_home:
@@ -23,9 +23,6 @@ inputs:
 jobs:
   - name: Audit
     id: audit
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: cargo-audit
         run: |

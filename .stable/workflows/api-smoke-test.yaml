@@ -6,7 +6,7 @@
 #   MET_CI_TOKEN            — service-account API token
 #   MET_CI_ADMIN_PASSWORD   — bootstrap admin password
 name: api-smoke-test
-version: "1.0.0"
+version: "1.0.1"
 description: Curl-based API health + auth + CRUD smoke checks against a Meticulous instance.
 inputs:
   base_url:
@@ -27,9 +27,6 @@ inputs:
 jobs:
   - name: Smoke
     id: smoke
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: health check
         run: |

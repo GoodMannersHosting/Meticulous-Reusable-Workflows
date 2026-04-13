@@ -1,8 +1,8 @@
-# Agent: curl, sh, Linux. Installs rustup default toolchain; TOOL_VERSION via inputs.rust_toolchain (e.g. 1.85.0).
+# Agent: curl, sh. Linux or macOS. Installs rustup default toolchain; TOOL_VERSION via inputs.rust_toolchain (e.g. 1.85.0).
 # Overrides RUSTUP_HOME/CARGO_HOME under workspace to keep toolchains inside the job workspace.
 # For multi-step jobs, expose paths with one met-output var per key when platform outputs are enabled.
 name: setup-rust
-version: "1.0.0"
+version: "1.0.1"
 description: Install rustup and a pinned toolchain under the workspace.
 inputs:
   rust_toolchain:
@@ -23,9 +23,6 @@ inputs:
 jobs:
   - name: Setup
     id: setup
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: rustup
         run: |

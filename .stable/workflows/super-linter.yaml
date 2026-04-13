@@ -3,7 +3,7 @@
 #
 # If docker/podman is missing or engine unreachable, this step prints a clear message and exits non-zero.
 name: super-linter
-version: "1.0.0"
+version: "1.0.1"
 description: Run GitHub super-linter via container when a container engine is available.
 inputs:
   validate_all_codebase:
@@ -19,14 +19,25 @@ inputs:
 jobs:
   - name: Lint
     id: lint
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: super-linter
         run: |
           set -euo pipefail
           WS="${METICULOUS_WORKSPACE:?}"
+          if [ -z "${DOCKER_HOST-}" ]; then
+            case "$(uname -s)" in
+              Linux)
+                for sock in /var/run/meticulous-dind/docker.sock /var/run/docker.sock; do
+                  [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break
+                done
+                ;;
+              Darwin)
+                for sock in "${HOME}/.docker/run/docker.sock" /var/run/docker.sock; do
+                  [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break
+                done
+                ;;
+            esac
+          fi
           RUNNER=()
           if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
             RUNNER=(docker run --rm -e RUNNER_WORKSPACE=/tmp/lint -e DEFAULT_BRANCH="${{ inputs.default_branch }}" -e VALIDATE_ALL_CODEBASE="${{ inputs.validate_all_codebase }}" -v "${WS}:/tmp/lint" ghcr.io/super-linter/super-linter:latest)

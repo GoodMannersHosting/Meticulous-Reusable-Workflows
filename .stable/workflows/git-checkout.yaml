@@ -1,4 +1,4 @@
-# Agent: Linux, git on PATH, network egress to clone host.
+# Agent: git on PATH, network egress to clone host (Linux or macOS).
 # Required: pipeline `secrets: GITHUB_TOKEN` (stored or other backend) so clones are non-interactive on GitHub.
 # Agents set GIT_TERMINAL_PROMPT=0; unauthenticated GitHub URLs are not used here.
 # Pool: default Linux tags below; override per org.
@@ -7,7 +7,7 @@
 #   met-output var CLONE_PATH="${SRC}"
 # so downstream jobs resolve ${{ workflows.<id>.outputs.CLONE_PATH }}.
 name: git-checkout
-version: "1.0.1"
+version: "1.0.2"
 description: Shallow clone a Git repository into the workspace (MAR/git-clone-snippet style).
 inputs:
   repo:
@@ -30,9 +30,6 @@ outputs:
 jobs:
   - name: Clone
     id: clone
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Git checkout
         run: |

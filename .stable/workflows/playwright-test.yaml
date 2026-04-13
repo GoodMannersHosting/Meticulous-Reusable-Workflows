@@ -1,4 +1,4 @@
-# Agent: Linux with Node.js (node + npm/npx) and the Meticulous frontend checked out.
+# Agent: Node.js (via nvm when missing) and the Meticulous frontend checked out. Linux or macOS.
 # Installs Playwright and its browsers, then runs the test suite against a live API instance.
 #
 # Requires a running Meticulous API (e.g. started by meticulous-ci-seed) and the frontend
@@ -9,7 +9,7 @@
 #   MET_CI_TOKEN          — service-account API token
 #   MET_CI_ADMIN_PASSWORD — bootstrap admin password
 name: playwright-test
-version: "1.0.0"
+version: "1.0.1"
 description: Run Playwright E2E tests against a live Meticulous frontend + API instance.
 inputs:
   workspace_path:
@@ -45,9 +45,6 @@ inputs:
 jobs:
   - name: E2E
     id: e2e
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Ensure Node.js
         run: |
@@ -76,10 +73,18 @@ jobs:
           npm ci
           # Install Playwright if it's a dependency, otherwise install it globally
           if grep -q '"@playwright/test"' package.json 2>/dev/null; then
-            npx playwright install --with-deps chromium
+            if [ "$(uname -s)" = "Darwin" ]; then
+              npx playwright install chromium
+            else
+              npx playwright install --with-deps chromium
+            fi
           else
             npm install -D @playwright/test
-            npx playwright install --with-deps chromium
+            if [ "$(uname -s)" = "Darwin" ]; then
+              npx playwright install chromium
+            else
+              npx playwright install --with-deps chromium
+            fi
           fi
       - name: Run Playwright tests
         run: |

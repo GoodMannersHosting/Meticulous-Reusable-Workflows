@@ -5,14 +5,14 @@
 # REGISTRY_USERNAME, REGISTRY_PASSWORD. Agents need Docker/Podman + buildx (global/docker-buildx-push),
 # Trivy on PATH (global/trivy-scan ≥ 1.1.0), and git for checkout.
 #
-# share-workspace + agent-affinity require a total depends-on order (no concurrent jobs in the group).
+# share-workspace applies only to invocations with explicit affinity-group; use a total depends-on
+# order within that group (no concurrent jobs sharing the workspace).
 # Flow per image: push then Trivy image scan + CycloneDX → sbom.cdx.json; the agent uploads that file
 # to the control plane when the scan job finishes (run SBOM tab).
 #
 # Re-import `trivy-scan` from this repo after bumping to 1.1.0 (registry login for private image pull).
 name: meticulous self-build
 agent-affinity:
-  default-group: ci
   share-workspace: true
 vars:
   METICULOUS_REPO: GoodMannersHosting/Meticulous
@@ -21,6 +21,7 @@ vars:
 workflows:
   - name: Checkout Meticulous
     id: checkout
+    affinity-group: ci
     workflow: global/git-checkout
     version: "1.0.0"
     inputs:
@@ -29,6 +30,7 @@ workflows:
       clone_path: meticulous
   - name: Build and push met-agent
     id: push-agent
+    affinity-group: ci
     workflow: global/docker-buildx-push
     version: "1.0.1"
     depends-on: [checkout]
@@ -39,6 +41,7 @@ workflows:
       registry_host: harbor.cloud.danmanners.com
   - name: Trivy scan met-agent (SBOM)
     id: scan-agent
+    affinity-group: ci
     workflow: global/trivy-scan
     version: "1.1.0"
     depends-on: [push-agent]
@@ -49,6 +52,7 @@ workflows:
       registry_host: harbor.cloud.danmanners.com
   - name: Build and push met-api
     id: push-api
+    affinity-group: ci
     workflow: global/docker-buildx-push
     version: "1.0.1"
     depends-on: [scan-agent]
@@ -59,6 +63,7 @@ workflows:
       registry_host: harbor.cloud.danmanners.com
   - name: Trivy scan met-api (SBOM)
     id: scan-api
+    affinity-group: ci
     workflow: global/trivy-scan
     version: "1.1.0"
     depends-on: [push-api]
@@ -69,6 +74,7 @@ workflows:
       registry_host: harbor.cloud.danmanners.com
   - name: Build and push met-controller
     id: push-controller
+    affinity-group: ci
     workflow: global/docker-buildx-push
     version: "1.0.1"
     depends-on: [scan-api]
@@ -79,6 +85,7 @@ workflows:
       registry_host: harbor.cloud.danmanners.com
   - name: Trivy scan met-controller (SBOM)
     id: scan-controller
+    affinity-group: ci
     workflow: global/trivy-scan
     version: "1.1.0"
     depends-on: [push-controller]
@@ -89,6 +96,7 @@ workflows:
       registry_host: harbor.cloud.danmanners.com
   - name: Build and push sqlx-migrate
     id: push-sqlx-migrate
+    affinity-group: ci
     workflow: global/docker-buildx-push
     version: "1.0.1"
     depends-on: [scan-controller]
@@ -99,6 +107,7 @@ workflows:
       registry_host: harbor.cloud.danmanners.com
   - name: Trivy scan sqlx-migrate (SBOM)
     id: scan-sqlx-migrate
+    affinity-group: ci
     workflow: global/trivy-scan
     version: "1.1.0"
     depends-on: [push-sqlx-migrate]

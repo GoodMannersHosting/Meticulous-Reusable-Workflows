@@ -1,6 +1,6 @@
-# Agent: trivy on PATH or curl to install; Docker optional for image mode.
+# Agent: installs Trivy into workspace when missing (Linux or macOS); Docker optional for image mode.
 name: trivy-scan
-version: "1.1.2"
+version: "1.2.0"
 description: Filesystem or image scan with Trivy; optional CycloneDX SBOM for Meticulous SBOM tab.
 inputs:
   mode:
@@ -22,12 +22,14 @@ inputs:
     required: false
     default: ""
     description: For image mode only — if set with REGISTRY_USERNAME / REGISTRY_PASSWORD in job env (pipeline secrets), run docker login before trivy image scan so private registries resolve.
+  trivy_version:
+    type: string
+    required: false
+    default: "0.69.3"
+    description: Trivy release version to download when trivy is not on PATH (no leading v; must match published tarballs).
 jobs:
   - name: Scan
     id: scan
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: trivy
         run: |
@@ -38,8 +40,28 @@ jobs:
           OUT="${WS}/${{ inputs.cyclonedx_path }}"
           case "${{ inputs.cyclonedx_path }}" in (*..*|/*) echo "bad cyclonedx path" >&2; exit 1;; esac
           if ! command -v trivy >/dev/null 2>&1; then
-            echo "Install trivy on the agent (https://aquasecurity.github.io/trivy)." >&2
-            exit 1
+            TV="${{ inputs.trivy_version }}"
+            TV="${TV#v}"
+            UNAME_S="$(uname -s)"
+            UM="$(uname -m)"
+            case "${UM}" in
+              x86_64) TM_ARCH=64bit ;;
+              aarch64|arm64) TM_ARCH=ARM64 ;;
+              *) echo "unsupported arch ${UM}" >&2; exit 1 ;;
+            esac
+            if [ "${UNAME_S}" = "Darwin" ]; then
+              TF="trivy_${TV}_macOS-${TM_ARCH}.tar.gz"
+            elif [ "${UNAME_S}" = "Linux" ]; then
+              TF="trivy_${TV}_Linux-${TM_ARCH}.tar.gz"
+            else
+              echo "trivy bootstrap: unsupported OS ${UNAME_S}" >&2
+              exit 1
+            fi
+            TC="${WS}/.toolcache/trivy"
+            mkdir -p "${TC}"
+            curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TV}/${TF}" -o /tmp/trivy.tgz
+            tar -xzf /tmp/trivy.tgz -C "${TC}"
+            export PATH="${TC}:${PATH}"
           fi
           # Trivy pulls the vuln DB over OCI; it reads Docker's config.json for registry auth helpers.
           # A host config with credsStore=docker-credential-desktop breaks headless agents (helper missing).

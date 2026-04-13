@@ -1,8 +1,8 @@
-# Agent: Linux with curl + sh (rustup installs under workspace via setup-rust pattern).
+# Agent: curl + sh (use setup-rust first; rustup supports Linux and macOS).
 # Run cargo fmt --check, cargo clippy -D warnings, and cargo check --workspace.
 # Depends on a prior setup-rust invocation sharing the same workspace (agent-affinity).
 name: cargo-lint
-version: "1.0.0"
+version: "1.0.1"
 description: Run cargo fmt, clippy, and check on a Rust workspace.
 inputs:
   rust_toolchain:
@@ -28,9 +28,6 @@ inputs:
 jobs:
   - name: Lint
     id: lint
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: fmt check
         run: |

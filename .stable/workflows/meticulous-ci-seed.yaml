@@ -14,7 +14,7 @@
 #   MET_CI_TOKEN       — service-account API token (plain text, shown once)
 #   MET_CI_ADMIN_PASSWORD — the bootstrap admin password used
 name: meticulous-ci-seed
-version: "1.0.0"
+version: "1.0.1"
 description: Start met-api in CI mode, seed data, emit token + URL as met-output vars.
 inputs:
   workspace_path:
@@ -45,9 +45,6 @@ inputs:
 jobs:
   - name: Seed
     id: seed
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Start CI met-api
         run: |

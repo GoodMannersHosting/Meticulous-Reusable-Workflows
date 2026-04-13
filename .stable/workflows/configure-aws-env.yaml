@@ -4,7 +4,7 @@
 # Map standard names by exporting from values already present in the environment (inject secret keys
 # on the pipeline, then reference those names in pipeline/env — never embed secret values in this file).
 name: configure-aws-env
-version: "1.0.0"
+version: "1.0.1"
 description: Normalize AWS env vars (region, optional profile) assuming credentials are pre-injected.
 inputs:
   aws_region:
@@ -20,9 +20,6 @@ inputs:
 jobs:
   - name: Env
     id: env
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Export
         run: |

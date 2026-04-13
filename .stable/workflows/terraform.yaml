@@ -1,6 +1,6 @@
-# Agent: terraform on PATH or install upstream zip ahead of time; Linux amd64 assumed for download fallback.
+# Agent: terraform on PATH or HashiCorp zip downloaded for Linux/macOS (amd64/arm64).
 name: terraform
-version: "1.0.0"
+version: "1.1.0"
 description: terraform fmt -check, init, validate, plan; optional gated apply.
 inputs:
   terraform_version:
@@ -25,9 +25,6 @@ inputs:
 jobs:
   - name: Terraform
     id: tf
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Run
         run: |
@@ -38,9 +35,20 @@ jobs:
           cd "${WS}/${WDIR}"
           if ! command -v terraform >/dev/null 2>&1; then
             VER="${{ inputs.terraform_version }}"
-            curl -fsSL "https://releases.hashicorp.com/terraform/${VER}/terraform_${VER}_linux_amd64.zip" -o /tmp/tf.zip
-            unzip -o /tmp/tf.zip -d /tmp
-            export PATH="/tmp:${PATH}"
+            UNAME_S="$(uname -s)"
+            UM="$(uname -m)"
+            case "${UNAME_S}-${UM}" in
+              Linux-x86_64) TF_OS_ARCH=linux_amd64 ;;
+              Linux-aarch64) TF_OS_ARCH=linux_arm64 ;;
+              Darwin-x86_64) TF_OS_ARCH=darwin_amd64 ;;
+              Darwin-arm64) TF_OS_ARCH=darwin_arm64 ;;
+              *) echo "terraform bootstrap: unsupported ${UNAME_S} ${UM}" >&2; exit 1 ;;
+            esac
+            TD="${WS}/.toolcache/terraform"
+            mkdir -p "${TD}"
+            curl -fsSL "https://releases.hashicorp.com/terraform/${VER}/terraform_${VER}_${TF_OS_ARCH}.zip" -o /tmp/tf.zip
+            unzip -o /tmp/tf.zip -d "${TD}"
+            export PATH="${TD}:${PATH}"
           fi
           terraform fmt -check -recursive
           terraform init -input=false

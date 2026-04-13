@@ -1,10 +1,10 @@
-# Agent: Linux. Runs Opengrep (OSS SAST, LGPL-2.1 fork of Semgrep) via its self-contained binary.
+# Agent: curl, bash. Linux or macOS. Runs Opengrep via official release binary or install.sh (latest).
 # Results are written to opengrep-report.json in the workspace root.
 # Fails on any finding when fail_on_findings is true.
 #
 # No account, API token, or container engine required.
 name: opengrep
-version: "1.0.0"
+version: "1.1.0"
 description: OSS SAST via Opengrep binary — no account or container engine required.
 inputs:
   scan_path:
@@ -35,9 +35,6 @@ inputs:
 jobs:
   - name: Scan
     id: scan
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Install opengrep
         run: |
@@ -48,22 +45,40 @@ jobs:
 
           VERSION="${{ inputs.version }}"
           if [ "${VERSION}" = "latest" ]; then
-            DOWNLOAD_URL="https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh"
-            curl -fsSL "${DOWNLOAD_URL}" | INSTALL_DIR="${INSTALL_DIR}" bash
+            curl -fsSL "https://raw.githubusercontent.com/opengrep/opengrep/main/install.sh" | bash
+            if [ -x "${INSTALL_DIR}/opengrep" ]; then
+              :
+            elif command -v opengrep >/dev/null 2>&1; then
+              cp "$(command -v opengrep)" "${INSTALL_DIR}/opengrep"
+            else
+              echo "opengrep install.sh did not leave a usable opengrep on PATH or in ${INSTALL_DIR}" >&2
+              exit 1
+            fi
           else
-            # Resolve the binary for the requested version directly from GitHub releases.
+            UNAME_S="$(uname -s)"
             ARCH="$(uname -m)"
-            case "${ARCH}" in
-              x86_64)  ARCH_TAG="x86_64-unknown-linux-musl" ;;
-              aarch64) ARCH_TAG="aarch64-unknown-linux-musl" ;;
-              *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;;
+            case "${UNAME_S}" in
+              Linux)
+                case "${ARCH}" in
+                  x86_64) ASSET="opengrep_musllinux_x86" ;;
+                  aarch64) ASSET="opengrep_musllinux_aarch64" ;;
+                  *) echo "Unsupported Linux arch: ${ARCH}" >&2; exit 1 ;;
+                esac
+                ;;
+              Darwin)
+                case "${ARCH}" in
+                  x86_64) ASSET="opengrep_osx_x86" ;;
+                  arm64) ASSET="opengrep_osx_arm64" ;;
+                  *) echo "Unsupported Darwin arch: ${ARCH}" >&2; exit 1 ;;
+                esac
+                ;;
+              *) echo "Unsupported OS: ${UNAME_S}" >&2; exit 1 ;;
             esac
-            BINARY_URL="https://github.com/opengrep/opengrep/releases/download/${VERSION}/opengrep-${ARCH_TAG}"
+            BINARY_URL="https://github.com/opengrep/opengrep/releases/download/${VERSION}/${ASSET}"
             curl -fsSL "${BINARY_URL}" -o "${INSTALL_DIR}/opengrep"
             chmod +x "${INSTALL_DIR}/opengrep"
           fi
 
-          # Verify the binary is runnable
           "${INSTALL_DIR}/opengrep" --version
           echo "OPENGREP_BIN=${INSTALL_DIR}/opengrep" >> "${METICULOUS_ENV}"
 

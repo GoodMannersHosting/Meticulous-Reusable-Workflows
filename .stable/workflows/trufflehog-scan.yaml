@@ -1,7 +1,7 @@
-# Agent: curl, sh, Linux. Downloads a pinned TruffleHog release; verify checksum (update VERSION/SHA256 together).
+# Agent: curl, sh. Linux or macOS. Downloads a pinned TruffleHog release (update version with asset names in sync).
 # Set TRUFFLEHOG_VERSION / EXPECTED_SHA256 via pipeline vars when importing; do not commit credentials.
 name: trufflehog-scan
-version: "1.0.0"
+version: "1.1.0"
 description: Run TruffleHog filesystem scan; fails on verified secrets by default.
 inputs:
   scan_path:
@@ -25,9 +25,6 @@ inputs:
 jobs:
   - name: Scan
     id: scan
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: trufflehog
         run: |
@@ -41,9 +38,15 @@ jobs:
             TH="${BIN}"
           else
             VER="${{ inputs.trufflehog_version }}"
+            UNAME_S="$(uname -s)"
             ARCH="$(uname -m)"
-            case "${ARCH}" in (x86_64) ARCH=amd64;; (aarch64) ARCH=arm64;; (*) echo "arch" >&2; exit 1;; esac
-            URL="https://github.com/trufflesecurity/trufflehog/releases/download/v${VER}/trufflehog_${VER}_linux_${ARCH}.tar.gz"
+            case "${ARCH}" in (x86_64) ARCH=amd64;; (aarch64|arm64) ARCH=arm64;; (*) echo "arch" >&2; exit 1;; esac
+            case "${UNAME_S}" in
+              Linux) TH_OS=linux ;;
+              Darwin) TH_OS=darwin ;;
+              *) echo "trufflehog bootstrap: unsupported OS ${UNAME_S}" >&2; exit 1 ;;
+            esac
+            URL="https://github.com/trufflesecurity/trufflehog/releases/download/v${VER}/trufflehog_${VER}_${TH_OS}_${ARCH}.tar.gz"
             echo "Download ${URL}"
             curl -fsSL "${URL}" -o /tmp/th.tgz
             tar -xzf /tmp/th.tgz -C /tmp

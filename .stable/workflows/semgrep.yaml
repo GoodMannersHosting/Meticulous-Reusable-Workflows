@@ -1,10 +1,10 @@
-# Agent: Linux with docker or podman. Runs Semgrep OSS via the official container image for
+# Agent: Docker or Podman (Linux typical; macOS Docker Desktop socket under ~/.docker/run). Runs Semgrep OSS via the official container image for
 # static analysis. Results are written to semgrep-report.json in the workspace root.
 # Fails on any finding at the configured severity level (default: ERROR).
 #
 # No Semgrep account or API token is required — uses semgrep/semgrep:latest from Docker Hub.
 name: semgrep
-version: "1.0.0"
+version: "1.0.1"
 description: OSS SAST via Semgrep container — no account required.
 inputs:
   scan_path:
@@ -30,9 +30,6 @@ inputs:
 jobs:
   - name: Scan
     id: scan
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Engine probe
         run: |
@@ -41,9 +38,18 @@ jobs:
           ENGINE_FILE="${WS}/.meticulous_container_engine"
           {
             echo 'if [ -z "${DOCKER_HOST-}" ]; then'
-            echo '  for sock in /var/run/meticulous-dind/docker.sock /var/run/docker.sock; do'
-            echo '    [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break'
-            echo '  done'
+            echo '  case "$(uname -s)" in'
+            echo '    Linux)'
+            echo '      for sock in /var/run/meticulous-dind/docker.sock /var/run/docker.sock; do'
+            echo '        [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break'
+            echo '      done'
+            echo '      ;;'
+            echo '    Darwin)'
+            echo '      for sock in "${HOME}/.docker/run/docker.sock" /var/run/docker.sock; do'
+            echo '        [ -S "${sock}" ] && export DOCKER_HOST="unix://${sock}" && break'
+            echo '      done'
+            echo '      ;;'
+            echo '  esac'
             echo 'fi'
           } > "${WS}/.meticulous_probe_docker_host.sh"
           # shellcheck disable=SC1091

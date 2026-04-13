@@ -1,7 +1,7 @@
-# Agent: curl, tar, Linux. TOOL_VERSION via inputs.go_version (e.g. 1.23.4).
+# Agent: curl, tar. Linux or macOS (official Go tarball per OS/arch). TOOL_VERSION via inputs.go_version (e.g. 1.23.4).
 # For multi-step jobs, propagate GOROOT/GOPATH with met-output var ... when platform outputs are enabled.
 name: setup-go
-version: "1.0.0"
+version: "1.1.0"
 description: Install Go toolchain into the workspace (official tarball).
 inputs:
   go_version:
@@ -17,9 +17,6 @@ inputs:
 jobs:
   - name: Setup
     id: setup
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Install Go
         run: |
@@ -30,9 +27,15 @@ jobs:
           case "${ROOT}" in (*..*) echo "invalid install_root" >&2; exit 1;; esac
           DEST="${WS}/${ROOT}"
           mkdir -p "${DEST}"
+          UNAME_S="$(uname -s)"
+          case "${UNAME_S}" in
+            Linux) GOOS=linux ;;
+            Darwin) GOOS=darwin ;;
+            *) echo "unsupported OS ${UNAME_S}" >&2; exit 1 ;;
+          esac
           ARCH="$(uname -m)"
-          case "${ARCH}" in (x86_64) ARCH2=amd64;; (aarch64) ARCH2=arm64;; (*) echo "unsupported arch" >&2; exit 1;; esac
-          URL="https://go.dev/dl/go${VER}.linux-${ARCH2}.tar.gz"
+          case "${ARCH}" in (x86_64) ARCH2=amd64;; (aarch64|arm64) ARCH2=arm64;; (*) echo "unsupported arch" >&2; exit 1;; esac
+          URL="https://go.dev/dl/go${VER}.${GOOS}-${ARCH2}.tar.gz"
           curl -fsSL "${URL}" -o /tmp/go.tgz
           tar -xzf /tmp/go.tgz -C "${DEST}" --strip-components=1
           export GOROOT="${DEST}"

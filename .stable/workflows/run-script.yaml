@@ -1,7 +1,7 @@
-# Agent: bash/sh on Linux; pwsh on Windows agents when shell=pwsh.
+# Agent: bash/sh on Unix (Linux/macOS); pwsh when shell=pwsh.
 # Executes a script **file** from the workspace only (no inline arbitrary command strings).
 name: run-script
-version: "1.0.0"
+version: "1.0.1"
 description: Run a script file under METICULOUS_WORKSPACE with bash, sh, or pwsh.
 inputs:
   script_path:
@@ -16,9 +16,6 @@ inputs:
 jobs:
   - name: Run
     id: run
-    runs-on:
-      tags:
-        - os: linux
     steps:
       - name: Execute
         run: |

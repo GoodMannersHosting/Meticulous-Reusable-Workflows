@@ -1,4 +1,4 @@
-# Agent: Linux with podman (or docker), curl, sh.
+# Agent: Linux with podman (or docker), curl, sh. (Podman compose stack is Linux-oriented; use a Linux agent.)
 # Spins up postgres + nats via podman-compose (or docker compose), runs cargo test --workspace,
 # tears everything down even on failure.
 #
