@@ -1,8 +1,8 @@
 # Agent: curl, sh. Linux or macOS. Downloads a pinned TruffleHog release (update version with asset names in sync).
 # Set TRUFFLEHOG_VERSION / EXPECTED_SHA256 via pipeline vars when importing; do not commit credentials.
 name: trufflehog-scan
-version: "1.1.0"
-description: Run TruffleHog filesystem scan; fails on verified secrets by default.
+version: "1.2.0"
+description: Run TruffleHog filesystem scan; fails on verified secrets by default (override with fail_on_findings).
 inputs:
   scan_path:
     type: string
@@ -22,6 +22,11 @@ inputs:
     type: string
     required: false
     description: If set, use this trufflehog binary on PATH instead of downloading.
+  fail_on_findings:
+    type: string
+    required: false
+    default: "true"
+    description: If "false", run the scan and print results but exit 0 even when TruffleHog finds verified secrets (omits --fail).
 jobs:
   - name: Scan
     id: scan
@@ -52,7 +57,12 @@ jobs:
             tar -xzf /tmp/th.tgz -C /tmp
             TH="/tmp/trufflehog"
           fi
-          ARGS=(filesystem "${SCAN}" --no-update --fail)
+          ARGS=(filesystem "${SCAN}" --no-update)
+          FAIL_ON="${{ inputs.fail_on_findings }}"
+          case "${FAIL_ON}" in
+            false|0|no|FALSE|No) ;;
+            *) ARGS+=(--fail) ;;
+          esac
           BASE="${{ inputs.base_ref }}"
           if [ -n "${BASE}" ]; then
             ARGS+=(--since-commit "${BASE}")
