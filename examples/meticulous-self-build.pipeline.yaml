@@ -23,7 +23,7 @@ workflows:
     id: checkout
     affinity-group: ci
     workflow: global/git-checkout
-    version: "1.0.0"
+    version: "1.0.2"
     inputs:
       repo: "${METICULOUS_REPO}"
       ref: main
@@ -32,7 +32,7 @@ workflows:
     id: push-agent
     affinity-group: ci
     workflow: global/docker-buildx-push
-    version: "1.0.1"
+    version: "1.0.2"
     depends-on: [checkout]
     inputs:
       context_path: meticulous
@@ -54,7 +54,7 @@ workflows:
     id: push-api
     affinity-group: ci
     workflow: global/docker-buildx-push
-    version: "1.0.1"
+    version: "1.0.2"
     depends-on: [scan-agent]
     inputs:
       context_path: meticulous
@@ -76,7 +76,7 @@ workflows:
     id: push-controller
     affinity-group: ci
     workflow: global/docker-buildx-push
-    version: "1.0.1"
+    version: "1.0.2"
     depends-on: [scan-api]
     inputs:
       context_path: meticulous
@@ -98,7 +98,7 @@ workflows:
     id: push-sqlx-migrate
     affinity-group: ci
     workflow: global/docker-buildx-push
-    version: "1.0.1"
+    version: "1.0.2"
     depends-on: [scan-controller]
     inputs:
       context_path: meticulous
