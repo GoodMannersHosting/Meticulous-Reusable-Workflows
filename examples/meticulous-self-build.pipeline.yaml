@@ -43,7 +43,7 @@ workflows:
     id: scan-agent
     affinity-group: ci
     workflow: global/trivy-scan
-    version: "1.1.0"
+    version: "1.2.0"
     depends-on: [push-agent]
     inputs:
       mode: image
@@ -65,7 +65,7 @@ workflows:
     id: scan-api
     affinity-group: ci
     workflow: global/trivy-scan
-    version: "1.1.0"
+    version: "1.2.0"
     depends-on: [push-api]
     inputs:
       mode: image
@@ -87,7 +87,7 @@ workflows:
     id: scan-controller
     affinity-group: ci
     workflow: global/trivy-scan
-    version: "1.1.0"
+    version: "1.2.0"
     depends-on: [push-controller]
     inputs:
       mode: image
@@ -109,7 +109,7 @@ workflows:
     id: scan-sqlx-migrate
     affinity-group: ci
     workflow: global/trivy-scan
-    version: "1.1.0"
+    version: "1.2.0"
     depends-on: [push-sqlx-migrate]
     inputs:
       mode: image
