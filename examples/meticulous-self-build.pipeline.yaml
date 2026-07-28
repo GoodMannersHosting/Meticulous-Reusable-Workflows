@@ -12,8 +12,6 @@
 #
 # Re-import `trivy-scan` from this repo after bumping to 1.1.0 (registry login for private image pull).
 name: meticulous self-build
-agent-affinity:
-  share-workspace: true
 vars:
   METICULOUS_REPO: GoodMannersHosting/Meticulous
   IMAGE_TAG: latest
