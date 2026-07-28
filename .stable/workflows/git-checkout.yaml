@@ -42,11 +42,11 @@ jobs:
           REF="${{ inputs.ref }}"
           REPO="${{ inputs.repo }}"
           echo "Cloning ${REPO} @ ${REF} into ${DEST}..."
-          if [ -z "${GITHUB_TOKEN:-}" ]; then
-            echo "GITHUB_TOKEN is not set. Add pipeline secrets (e.g. secrets: GITHUB_TOKEN: stored: name: ...) so the agent can clone from GitHub without interactive prompts." >&2
-            exit 1
+          CLONE_URL="https://github.com/${REPO}.git"
+          if [ -n "${GITHUB_TOKEN:-}" ]; then
+            CLONE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
           fi
-          git clone --progress --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git" "${DEST}"
+          git clone --progress --depth 1 "${CLONE_URL}" "${DEST}"
           if [ "${REF}" != "HEAD" ]; then
             git -C "${DEST}" fetch --depth 1 origin "${REF}" && git -C "${DEST}" checkout FETCH_HEAD
           fi
